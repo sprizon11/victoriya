@@ -1,0 +1,30 @@
+/* StitchTrack App Styles */
+.animate-fade-in {
+    animation: fadeIn 0.35s ease-out;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.font-mono-num {
+    font-family: "JetBrains Mono", monospace;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Rich card hover effects */
+.rich-card {
+    transition: all 0.2s ease;
+}
+.rich-card:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+}
+
+/* Print styles */
+@media print {
+    nav, header, button, .no-print { display: none !important; }
+    main { padding: 0 !important; }
+    .print-full { width: 100% !important; max-width: 100% !important; }
+}

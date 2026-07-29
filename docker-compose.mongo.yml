@@ -1,0 +1,21 @@
+# Easiest way to get MongoDB on Windows without installing it.
+# Requires Docker Desktop.
+#
+#   Start:  docker compose -f docker-compose.mongo.yml up -d
+#   Stop:   docker compose -f docker-compose.mongo.yml down
+#   Wipe:   docker compose -f docker-compose.mongo.yml down -v
+#
+# Data survives restarts in the named volume "victoria_mongo_data".
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: victoria-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - victoria_mongo_data:/data/db
+
+volumes:
+  victoria_mongo_data:

@@ -1,0 +1,14 @@
+**/node_modules
+**/build
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.env
+**/.env.*
+!**/.env.example
+backend/memory
+.git
+.gitignore
+*.md
+*.bat
+docker-compose.mongo.yml

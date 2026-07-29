@@ -1,0 +1,460 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ==========================================================================
+   Design tokens
+   Palette is derived from the Victoria logo: navy #294F96 and leaf teal
+   #00AF92. Density is tuned for a data-dense operations dashboard, so the
+   spacing scale is deliberately tighter than a marketing site.
+   ========================================================================== */
+
+@layer base {
+    :root {
+        /* brand */
+        --brand: 219 57% 37%;           /* #294F96 navy   */
+        --brand-600: 219 57% 32%;
+        --brand-700: 219 58% 26%;
+        --brand-50: 219 60% 96%;
+        --brand-100: 219 55% 91%;
+        --leaf: 170 100% 34%;           /* #00AF92 teal   */
+        --leaf-50: 170 60% 95%;
+        --leaf-100: 170 55% 88%;
+
+        /* semantic */
+        --background: 210 33% 97%;
+        --foreground: 222 45% 14%;
+        --card: 0 0% 100%;
+        --card-foreground: 222 45% 14%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 222 45% 14%;
+        --primary: var(--brand);
+        --primary-foreground: 0 0% 100%;
+        --secondary: 214 32% 95%;
+        --secondary-foreground: 222 45% 14%;
+        --muted: 214 32% 95%;
+        --muted-foreground: 215 18% 46%;
+        --accent: var(--leaf);
+        --accent-foreground: 0 0% 100%;
+        --destructive: 0 72% 51%;
+        --destructive-foreground: 0 0% 100%;
+        --success: 152 62% 36%;
+        --warning: 32 90% 44%;
+        --border: 214 28% 90%;
+        --input: 214 28% 88%;
+        --ring: 219 57% 45%;
+
+        --chart-1: 219 57% 45%;
+        --chart-2: 170 100% 34%;
+        --chart-3: 32 90% 50%;
+        --chart-4: 265 55% 55%;
+        --chart-5: 341 65% 52%;
+
+        --radius: 0.625rem;
+
+        /* elevation - low-spread, tinted with the brand hue so shadows never
+           look like flat grey smudges on the blue-tinted background */
+        --shadow-xs: 0 1px 2px 0 hsl(219 40% 20% / 0.05);
+        --shadow-sm: 0 1px 3px 0 hsl(219 40% 20% / 0.07), 0 1px 2px -1px hsl(219 40% 20% / 0.05);
+        --shadow-md: 0 4px 12px -2px hsl(219 40% 20% / 0.09), 0 2px 4px -2px hsl(219 40% 20% / 0.05);
+        --shadow-lg: 0 12px 28px -6px hsl(219 40% 20% / 0.14), 0 4px 8px -4px hsl(219 40% 20% / 0.06);
+
+        /* motion - one place to retune the feel of the whole app */
+        --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+        --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+        --dur-fast: 140ms;
+        --dur-base: 220ms;
+        --dur-slow: 380ms;
+    }
+}
+
+@layer base {
+    * {
+        @apply border-border;
+    }
+    body {
+        @apply bg-background text-foreground antialiased;
+        font-family: "IBM Plex Sans", system-ui, sans-serif;
+        font-feature-settings: "cv02", "cv03", "cv04";
+    }
+    h1, h2, h3, h4, h5, h6 {
+        font-family: "Outfit", system-ui, sans-serif;
+        @apply tracking-[-0.01em];
+    }
+    /* Money and quantities must line up column-to-column. */
+    .tnum, table td, table th {
+        font-variant-numeric: tabular-nums;
+    }
+    /* A visible, consistent focus ring everywhere - never remove it. */
+    :focus-visible {
+        @apply outline-none ring-2 ring-ring/60 ring-offset-2 ring-offset-background rounded-[4px];
+    }
+    ::selection {
+        background: hsl(var(--brand) / 0.16);
+    }
+}
+
+/* ==========================================================================
+   Motion
+   Durations sit in the 140-380ms band. Everything is transform/opacity only
+   so animation stays on the compositor and never triggers layout.
+   ========================================================================== */
+
+@layer utilities {
+    @keyframes v-fade-in {
+        from { opacity: 0; }
+        to   { opacity: 1; }
+    }
+    @keyframes v-rise {
+        from { opacity: 0; transform: translate3d(0, 10px, 0); }
+        to   { opacity: 1; transform: none; }
+    }
+    @keyframes v-rise-sm {
+        from { opacity: 0; transform: translate3d(0, 5px, 0); }
+        to   { opacity: 1; transform: none; }
+    }
+    @keyframes v-pop {
+        from { opacity: 0; transform: scale(0.96); }
+        to   { opacity: 1; transform: none; }
+    }
+    @keyframes v-slide-right {
+        from { opacity: 0; transform: translate3d(-10px, 0, 0); }
+        to   { opacity: 1; transform: none; }
+    }
+    @keyframes v-shimmer {
+        100% { transform: translateX(100%); }
+    }
+    @keyframes v-bar {
+        from { transform: scaleX(0); }
+        to   { transform: scaleX(1); }
+    }
+    @keyframes v-pulse-ring {
+        0%   { box-shadow: 0 0 0 0 hsl(var(--leaf) / 0.45); }
+        70%  { box-shadow: 0 0 0 7px hsl(var(--leaf) / 0); }
+        100% { box-shadow: 0 0 0 0 hsl(var(--leaf) / 0); }
+    }
+
+    .animate-fade-in  { animation: v-fade-in var(--dur-base) var(--ease-out) both; }
+    .animate-rise     { animation: v-rise var(--dur-slow) var(--ease-out) both; }
+    .animate-rise-sm  { animation: v-rise-sm var(--dur-base) var(--ease-out) both; }
+    .animate-pop      { animation: v-pop var(--dur-base) var(--ease-spring) both; }
+    .animate-slide-right { animation: v-slide-right var(--dur-base) var(--ease-out) both; }
+    .animate-pulse-ring  { animation: v-pulse-ring 2s ease-out infinite; }
+
+    /* Stagger: set --i on each child and they cascade in. Capped at 12 so a
+       500-row table never waits three seconds to finish appearing. */
+    .stagger > * {
+        animation: v-rise-sm var(--dur-base) var(--ease-out) both;
+        animation-delay: calc(min(var(--i, 0), 12) * 35ms);
+    }
+    .stagger-fast > * {
+        animation: v-rise-sm 180ms var(--ease-out) both;
+        animation-delay: calc(min(var(--i, 0), 14) * 22ms);
+    }
+
+    .press {
+        transition: transform var(--dur-fast) var(--ease-out),
+                    box-shadow var(--dur-fast) var(--ease-out),
+                    background-color var(--dur-fast) var(--ease-out),
+                    color var(--dur-fast) var(--ease-out);
+    }
+    .press:active {
+        transform: translateY(1px) scale(0.985);
+    }
+
+    .lift {
+        transition: transform var(--dur-base) var(--ease-out),
+                    box-shadow var(--dur-base) var(--ease-out),
+                    border-color var(--dur-base) var(--ease-out);
+    }
+    .lift:hover {
+        transform: translateY(-2px);
+        box-shadow: var(--shadow-lg);
+    }
+
+    .shadow-xs { box-shadow: var(--shadow-xs); }
+    .shadow-card { box-shadow: var(--shadow-sm); }
+    .shadow-float { box-shadow: var(--shadow-md); }
+    .shadow-pop { box-shadow: var(--shadow-lg); }
+
+    /* Skeleton shimmer for loading states */
+    .skeleton {
+        @apply relative overflow-hidden bg-slate-200/70 rounded;
+    }
+    .skeleton::after {
+        content: "";
+        @apply absolute inset-0 -translate-x-full;
+        background-image: linear-gradient(90deg,
+            transparent, hsl(0 0% 100% / 0.55), transparent);
+        animation: v-shimmer 1.5s infinite;
+    }
+
+    .bar-grow {
+        transform-origin: left;
+        animation: v-bar var(--dur-slow) var(--ease-out) both;
+    }
+
+    /* Hairline gradient used under headers and above totals rows */
+    .rule-brand {
+        background-image: linear-gradient(90deg,
+            hsl(var(--brand) / 0.55), hsl(var(--leaf) / 0.45), transparent);
+    }
+}
+
+/* ==========================================================================
+   Liquid glass
+   Real glass needs three things to read as glass rather than as a grey box:
+   something moving behind it to refract, a blur that also lifts saturation,
+   and a specular rim that catches light on the top-left edge.
+   ========================================================================== */
+
+@layer utilities {
+    .glass {
+        background:
+            linear-gradient(160deg, hsl(0 0% 100% / 0.14), hsl(0 0% 100% / 0.04) 42%, hsl(0 0% 100% / 0.07));
+        -webkit-backdrop-filter: blur(28px) saturate(180%);
+        backdrop-filter: blur(28px) saturate(180%);
+        box-shadow:
+            inset 0 1px 0 0 hsl(0 0% 100% / 0.22),
+            inset 0 -1px 0 0 hsl(0 0% 100% / 0.06),
+            0 24px 70px -12px hsl(219 60% 6% / 0.55),
+            0 8px 24px -8px hsl(219 60% 6% / 0.35);
+    }
+
+    .glass-soft {
+        background: linear-gradient(160deg, hsl(0 0% 100% / 0.10), hsl(0 0% 100% / 0.03));
+        -webkit-backdrop-filter: blur(16px) saturate(150%);
+        backdrop-filter: blur(16px) saturate(150%);
+        box-shadow: inset 0 1px 0 0 hsl(0 0% 100% / 0.16);
+    }
+
+    /* White frosted glass. Held at a high white ratio on purpose: below about
+       0.7 the dark backdrop bleeds through and the panel reads blue rather
+       than white. Still translucent - the aurora is visible softly through it. */
+    .glass-white {
+        background: linear-gradient(160deg,
+            hsl(0 0% 100% / 0.92), hsl(0 0% 100% / 0.80) 55%, hsl(0 0% 100% / 0.86));
+        -webkit-backdrop-filter: blur(30px) saturate(140%);
+        backdrop-filter: blur(30px) saturate(140%);
+        box-shadow:
+            inset 0 1px 0 0 hsl(0 0% 100% / 0.95),
+            inset 0 -1px 0 0 hsl(0 0% 100% / 0.35),
+            0 30px 70px -14px hsl(219 60% 6% / 0.55),
+            0 10px 28px -10px hsl(219 60% 6% / 0.35);
+    }
+
+    /* Lighter rim for the white panel - a bright white edge would disappear
+       against the surface, so this one is a touch cooler and more defined. */
+    .glass-edge-light::before {
+        background: linear-gradient(
+            145deg,
+            hsl(0 0% 100% / 0.95) 0%,
+            hsl(0 0% 100% / 0.45) 30%,
+            hsl(219 40% 70% / 0.25) 58%,
+            hsl(0 0% 100% / 0.40) 100%
+        );
+    }
+
+    /* Specular rim: a 1px gradient border that is bright where light would
+       hit and fades to nothing on the shaded edges. Drawn with a masked
+       pseudo-element so it stays crisp at any radius. */
+    .glass-edge {
+        position: relative;
+        isolation: isolate;
+    }
+    .glass-edge::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        padding: 1px;
+        background: linear-gradient(
+            145deg,
+            hsl(0 0% 100% / 0.65) 0%,
+            hsl(0 0% 100% / 0.12) 26%,
+            hsl(0 0% 100% / 0) 52%,
+            hsl(0 0% 100% / 0.10) 78%,
+            hsl(0 0% 100% / 0.30) 100%
+        );
+        -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+        -webkit-mask-composite: xor;
+        mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+        mask-composite: exclude;
+        pointer-events: none;
+        z-index: 1;
+    }
+
+    /* A soft sheen sweeping the upper third, like light across a curved pane. */
+    .glass-sheen::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        background: radial-gradient(
+            120% 80% at 12% -10%,
+            hsl(0 0% 100% / 0.18) 0%,
+            hsl(0 0% 100% / 0.04) 38%,
+            transparent 70%
+        );
+        pointer-events: none;
+        z-index: 0;
+    }
+
+    /* Fine grain stops large blurred gradients from banding on cheap panels. */
+    .grain::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0.5;
+        mix-blend-mode: overlay;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.35'/%3E%3C/svg%3E");
+    }
+
+    /* Drifting light behind the glass. Transform/opacity only, so it composites
+       on the GPU and costs nothing on the main thread. */
+    @keyframes v-drift-a {
+        0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+        33%      { transform: translate3d(8vw, -6vh, 0) scale(1.18); }
+        66%      { transform: translate3d(-5vw, 7vh, 0) scale(0.92); }
+    }
+    @keyframes v-drift-b {
+        0%, 100% { transform: translate3d(0, 0, 0) scale(1.05); }
+        40%      { transform: translate3d(-9vw, 5vh, 0) scale(0.88); }
+        75%      { transform: translate3d(6vw, -8vh, 0) scale(1.22); }
+    }
+    @keyframes v-drift-c {
+        0%, 100% { transform: translate3d(0, 0, 0) scale(0.95); }
+        50%      { transform: translate3d(5vw, 9vh, 0) scale(1.15); }
+    }
+
+    .aurora {
+        position: absolute;
+        border-radius: 9999px;
+        filter: blur(90px);
+        will-change: transform;
+    }
+    .aurora-a { animation: v-drift-a 26s ease-in-out infinite; }
+    .aurora-b { animation: v-drift-b 32s ease-in-out infinite; }
+    .aurora-c { animation: v-drift-c 22s ease-in-out infinite; }
+}
+
+/* Anyone who has asked their OS to reduce motion gets none of it. */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+    .lift:hover { transform: none; }
+    .press:active { transform: none; }
+}
+
+/* ==========================================================================
+   Data-entry grid
+   ========================================================================== */
+
+.excel-input {
+    @apply w-full bg-transparent border-0 outline-none text-sm tabular-nums px-2 py-1.5;
+    transition: background-color var(--dur-fast) var(--ease-out),
+                box-shadow var(--dur-fast) var(--ease-out);
+}
+.excel-input:hover:not(:disabled) {
+    @apply bg-slate-50;
+}
+.excel-input:focus {
+    @apply bg-brand-50/70 rounded-[3px];
+    box-shadow: inset 0 0 0 2px hsl(var(--brand) / 0.35);
+}
+.excel-input:focus-visible {
+    @apply ring-0 ring-offset-0;
+}
+
+/* Hide number-input spinners: they steal width in the entry grid and a stray
+   scroll over a focused cell would otherwise change the quantity. */
+.excel-input[type="number"]::-webkit-outer-spin-button,
+.excel-input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+.excel-input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
+/* Sticky first column in wide matrices */
+.sticky-col {
+    @apply sticky left-0 z-10;
+}
+
+/* ==========================================================================
+   Mobile / tablet (supervisors entering production from the floor)
+   ========================================================================== */
+
+@media (max-width: 767px) {
+    /* iOS Safari auto-zooms into any input whose font-size is under 16px, which
+       throws you out of position in the grid on every single cell tap. */
+    input,
+    select,
+    textarea,
+    .excel-input {
+        font-size: 16px !important;
+    }
+
+    /* Taller rows so a fingertip hits one cell, not three (44px target). */
+    .excel-input {
+        @apply py-3;
+    }
+
+    /* Give horizontally-scrolling tables momentum scrolling on iOS. */
+    .overflow-x-auto {
+        -webkit-overflow-scrolling: touch;
+    }
+}
+
+/* ==========================================================================
+   Scrollbars
+   ========================================================================== */
+
+::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+}
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+::-webkit-scrollbar-thumb {
+    background: hsl(215 20% 78%);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: hsl(215 18% 62%);
+    background-clip: content-box;
+}
+.scroll-dark::-webkit-scrollbar-thumb {
+    background: hsl(219 30% 40%);
+    background-clip: content-box;
+}
+
+/* ==========================================================================
+   Print - vouchers and salary sheets go straight to paper
+   ========================================================================== */
+
+@media print {
+    @page { margin: 12mm; }
+    body { background: #fff; }
+    .print\:hidden, aside, header button { display: none !important; }
+    .print-full {
+        position: static !important;
+        box-shadow: none !important;
+        border: none !important;
+    }
+    .lift:hover { transform: none; box-shadow: none; }
+    table { page-break-inside: auto; }
+    tr { page-break-inside: avoid; page-break-after: auto; }
+}
