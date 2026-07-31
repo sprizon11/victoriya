@@ -4,9 +4,11 @@ import { useAuth } from '../contexts/AuthContext';
 import { Label } from '../components/ui/label';
 import { Mail, Lock, Eye, EyeOff, AlertCircle, ArrowRight } from 'lucide-react';
 
-// Logo used exactly as supplied, on a solid white plate so the navy wordmark
-// and teal leaf keep their real colours.
-const LOGO = "/victoria-logo-mark.png";
+// Reversed logo with the navy keyed out, so it sits on the dark background with
+// no white plate behind it. The navy version would be invisible here.
+const LOGO = "/victoria-logo-mark-light.png";
+// The leaf mark on its own, used oversized as a background watermark.
+const LEAF = "/victoria-leaf.png";
 const BG = "/victoria-login-bg.jpg";
 
 function formatError(detail) {
@@ -71,13 +73,18 @@ export default function LoginPage() {
                 <div className="aurora aurora-c bottom-[-12%] left-[30%] h-[32vw] w-[32vw] bg-[#6f57c9]/20" />
             </div>
 
+            {/* Oversized leaf watermark. Bleeds off the left edge and sits behind
+                everything - decorative, so it is hidden from assistive tech. */}
+            <div className="pointer-events-none absolute -left-[9%] top-1/2 hidden -translate-y-1/2 lg:block"
+                aria-hidden="true">
+                <img src={LEAF} alt="" className="h-[82vh] max-h-[780px] w-auto opacity-[0.07]" />
+            </div>
+
             <div className="relative z-10 mx-auto flex w-full max-w-[1240px] flex-col items-center gap-10 px-5 py-12 lg:flex-row lg:justify-between lg:gap-16 lg:py-0">
 
                 {/* ------------------------------------------------ brand side */}
                 <div className="w-full max-w-xl text-center lg:text-left">
-                    <div className="animate-rise inline-flex rounded-2xl bg-white px-6 py-4 shadow-[0_14px_40px_-10px_rgba(4,12,32,0.6)]">
-                        <img src={LOGO} alt="Victoria Garments" className="h-10" />
-                    </div>
+                    <img src={LOGO} alt="Victoria Garments" className="animate-rise h-11 w-auto" />
 
                     <h1 className="animate-rise mt-8 font-outfit text-[38px] font-semibold leading-[1.08] tracking-[-0.02em] text-white sm:text-[46px]"
                         style={{ animationDelay: '70ms' }}>

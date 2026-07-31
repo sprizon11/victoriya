@@ -28,3 +28,13 @@ yarn-error.log*
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# temporary connection-string file for remote seeding
+backend/mongo_url.txt
+mongo_url.txt
+
+# Generated client deliverables - the PDF contains login credentials and the
+# repository is public. The generator scripts are committed instead, so both
+# documents can be rebuilt from source.
+VICTORIA-CLIENT-REPORT.pdf
+VICTORIA-PROJECT-REPORT.xlsx

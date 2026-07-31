@@ -17,6 +17,7 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel
 from bson import ObjectId
+from pymongo.errors import DuplicateKeyError
 import bcrypt
 import jwt
 
@@ -2037,13 +2038,21 @@ async def seed_admin():
     admin_password = os.environ.get("ADMIN_PASSWORD", "admin123")
     existing = await db.users.find_one({"email": admin_email})
     if not existing:
-        await db.users.insert_one({
-            "email": admin_email, "password_hash": hash_password(admin_password),
-            "name": "Admin", "role": "admin", "active": True,
-            "created_at": datetime.now(timezone.utc).isoformat()
-        })
-        logger.info(f"Admin seeded: {admin_email}")
-    elif not verify_password(admin_password, existing["password_hash"]):
+        # check-then-insert is a race when the server runs more than one worker:
+        # both see "no admin", both insert, and the unique index on email kills
+        # the loser with DuplicateKeyError, taking that whole worker down. The
+        # duplicate simply means another worker got there first, which is fine.
+        try:
+            await db.users.insert_one({
+                "email": admin_email, "password_hash": hash_password(admin_password),
+                "name": "Admin", "role": "admin", "active": True,
+                "created_at": datetime.now(timezone.utc).isoformat()
+            })
+            logger.info(f"Admin seeded: {admin_email}")
+        except DuplicateKeyError:
+            logger.info(f"Admin {admin_email} already created by another worker.")
+            existing = await db.users.find_one({"email": admin_email})
+    if existing and not verify_password(admin_password, existing["password_hash"]):
         # Previously this silently reset the admin password to match .env on EVERY
         # boot, so a password changed in the UI would revert on the next restart.
         # Now it is opt-in via ADMIN_PASSWORD_RESET=true (use it if you get locked out).
@@ -2066,9 +2075,14 @@ async def seed_admin():
             f.write("## Auth Endpoints\n- POST /api/auth/login\n- POST /api/auth/logout\n- GET /api/auth/me\n- POST /api/auth/refresh\n")
 
 async def seed_settings():
-    existing = await db.system_settings.find_one({"key": "week_definition"})
-    if not existing:
-        await db.system_settings.insert_one({"key": "week_definition", "value": "monday_sunday"})
+    # upsert rather than check-then-insert: with several workers booting at once
+    # the check-then-insert version would write duplicate settings rows, since
+    # system_settings has no unique index to stop it.
+    await db.system_settings.update_one(
+        {"key": "week_definition"},
+        {"$setOnInsert": {"value": "monday_sunday"}},
+        upsert=True,
+    )
 
 @app.on_event("startup")
 async def startup():

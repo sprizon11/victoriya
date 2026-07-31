@@ -8,11 +8,15 @@ data a real factory would have -- daily entries across a full week -- which is
 what makes the reporting bugs visible on screen.
 
 Usage:
-    backend\\.venv\\Scripts\\python.exe backend\\seed_demo.py
-    backend\\.venv\\Scripts\\python.exe backend\\seed_demo.py --wipe    (clear first)
+    LOCAL database (from backend/.env):
+        backend\\.venv\\Scripts\\python.exe backend\\seed_demo.py
+        backend\\.venv\\Scripts\\python.exe backend\\seed_demo.py --wipe
 
-Reads MONGO_URL / DB_NAME from backend/.env. Leaves the users collection alone,
-so your admin login still works.
+    REMOTE database (Render / Atlas) - prompts for the connection string so the
+    password is never typed on the command line or saved anywhere:
+        backend\\.venv\\Scripts\\python.exe backend\\seed_demo.py --remote --wipe
+
+Leaves the users collection alone, so the admin login still works.
 """
 
 import os
@@ -21,6 +25,7 @@ import uuid
 import random
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from getpass import getpass
 
 from dotenv import load_dotenv
 from pymongo import MongoClient
@@ -28,8 +33,50 @@ from pymongo import MongoClient
 ROOT = Path(__file__).parent
 load_dotenv(ROOT / ".env")
 
-client = MongoClient(os.environ["MONGO_URL"])
-db = client[os.environ["DB_NAME"]]
+def _read_url_file(path: Path) -> str:
+    if not path.exists():
+        print(f"\nFile not found: {path}")
+        print("Create it, paste your connection string as the only line, save, and re-run.")
+        sys.exit(1)
+    text = path.read_text(encoding="utf-8-sig").strip().strip('"').strip("'")
+    return text
+
+
+if "--remote" in sys.argv:
+    print("\nSeeding a REMOTE database (e.g. Render / Atlas).")
+
+    # Preferred: read from a file. Pasting into Notepad is reliable, unlike
+    # pasting into a hidden getpass prompt, and the string never touches the
+    # terminal history or the chat. Default file: backend/mongo_url.txt
+    if "--url-file" in sys.argv:
+        idx = sys.argv.index("--url-file")
+        url_path = Path(sys.argv[idx + 1])
+    else:
+        url_path = ROOT / "mongo_url.txt"
+
+    if url_path.exists():
+        mongo_url = _read_url_file(url_path)
+        print(f"Read connection string from {url_path.name}")
+    else:
+        print("Paste the connection string and press Enter - nothing is echoed.\n")
+        mongo_url = getpass("MONGO_URL > ").strip().strip('"').strip("'")
+
+    if not mongo_url.startswith(("mongodb://", "mongodb+srv://")):
+        print("\nThat does not look like a connection string (it should start with")
+        print("mongodb+srv://). Nothing was changed. Aborting.")
+        sys.exit(1)
+
+    db_name = "victoria_unit_flow"
+    print("Connecting...")
+    client = MongoClient(mongo_url, serverSelectionTimeoutMS=10000)
+    client.admin.command("ping")   # fail fast if it cannot connect
+    print(f"Connected to remote database '{db_name}'.\n")
+else:
+    mongo_url = os.environ["MONGO_URL"]
+    db_name = os.environ["DB_NAME"]
+    client = MongoClient(mongo_url)
+
+db = client[db_name]
 
 random.seed(20260728)  # deterministic: re-running gives the same numbers
 
@@ -359,7 +406,9 @@ def main():
 
     print(f"\nproduction entries: {total_entries}")
     print(f"advances: {n_adv}")
-    print("\nDone. Refresh http://localhost:3000")
+    where = "your deployed app (e.g. https://victoriya.onrender.com)" if "--remote" in sys.argv \
+        else "http://localhost:3000"
+    print(f"\nDone. Refresh {where}")
 
 
 if __name__ == "__main__":

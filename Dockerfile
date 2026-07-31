@@ -54,4 +54,7 @@ ENV FRONTEND_BUILD_DIR=/app/frontend/build \
 EXPOSE 8000
 
 # Render (and most PaaS) inject $PORT; default to 8000 elsewhere.
-CMD ["sh", "-c", "cd backend && exec uvicorn server:app --host 0.0.0.0 --port ${PORT:-8000} --workers 2 --proxy-headers --forwarded-allow-ips='*'"]
+# Worker count follows WEB_CONCURRENCY, which the host sets from the available
+# CPUs (Render's free/starter instances get 1). Hardcoding 2 oversubscribed a
+# 0.1-CPU instance and doubled the memory footprint for no benefit.
+CMD ["sh", "-c", "cd backend && exec uvicorn server:app --host 0.0.0.0 --port ${PORT:-8000} --workers ${WEB_CONCURRENCY:-1} --proxy-headers --forwarded-allow-ips='*'"]
