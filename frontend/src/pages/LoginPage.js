@@ -65,12 +65,13 @@ export default function LoginPage() {
             />
             <div className="absolute inset-0 bg-gradient-to-br from-[#0a1836] via-[#12295a] to-[#091530]" aria-hidden="true" />
 
-            {/* Drifting light. The card is the only glass surface, and glass needs
-                moving colour behind it or it just reads as a flat grey box. */}
+            {/* Coloured light behind the glass card. STATIC - these used to drift,
+                which swept light across the leaf watermark below and made the
+                watermark itself look like it was sliding across the page. */}
             <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
-                <div className="aurora aurora-a -left-[6%] top-[6%] h-[42vw] w-[42vw] bg-leaf/28" />
-                <div className="aurora aurora-b right-[-6%] top-[26%] h-[40vw] w-[40vw] bg-[#3b7fe0]/28" />
-                <div className="aurora aurora-c bottom-[-12%] left-[30%] h-[32vw] w-[32vw] bg-[#6f57c9]/20" />
+                <div className="aurora -left-[6%] top-[6%] h-[42vw] w-[42vw] bg-leaf/28" />
+                <div className="aurora right-[-6%] top-[26%] h-[40vw] w-[40vw] bg-[#3b7fe0]/28" />
+                <div className="aurora bottom-[-12%] left-[30%] h-[32vw] w-[32vw] bg-[#6f57c9]/20" />
             </div>
 
             {/* Oversized leaf watermark. Bleeds off the left edge and sits behind
@@ -84,24 +85,37 @@ export default function LoginPage() {
 
                 {/* ------------------------------------------------ brand side */}
                 <div className="w-full max-w-xl text-center lg:text-left">
-                    <img src={LOGO} alt="Victoria Garments" className="animate-rise h-11 w-auto" />
+                    {/* Outer element owns the position, inner one owns the entrance
+                        animation. They cannot share an element - the animation drives
+                        `transform`, which would override the translate and silently
+                        cancel the offset. */}
+                    <div className="mx-auto w-fit lg:translate-x-24">
+                        <div className="animate-logo-in relative">
+                            {/* soft teal bloom behind the mark */}
+                            <span aria-hidden="true"
+                                className="animate-glow pointer-events-none absolute inset-0 -z-10 scale-[1.35]
+                                    rounded-full bg-leaf/25 blur-[46px]" />
+                            {/* Gentle 4px breathe over 10s - deliberately half the
+                                travel and slower than the earlier float, so it reads
+                                as alive rather than as something sliding about. */}
+                            <img src={LOGO} alt="Victoria Garments"
+                                className="float-gentle block h-16 w-auto sm:h-[88px]" />
+                        </div>
+                    </div>
 
-                    <h1 className="animate-rise mt-8 font-outfit text-[38px] font-semibold leading-[1.08] tracking-[-0.02em] text-white sm:text-[46px]"
-                        style={{ animationDelay: '70ms' }}>
+                    <h1 className="mt-8 font-outfit text-[38px] font-semibold leading-[1.08] tracking-[-0.02em] text-white sm:text-[46px]">
                         Every piece counted.
                         <span className="mt-1 block bg-gradient-to-r from-leaf via-[#39d8b6] to-[#7fe8d2] bg-clip-text text-transparent">
                             Every rupee accounted for.
                         </span>
                     </h1>
 
-                    <p className="animate-rise mx-auto mt-5 max-w-md text-[14.5px] leading-relaxed text-white/70 lg:mx-0"
-                        style={{ animationDelay: '150ms' }}>
+                    <p className="mx-auto mt-5 max-w-md text-[14.5px] leading-relaxed text-white/70 lg:mx-0">
                         Production tracking and piece-rate payroll for Victoria Garments,
                         Tiruppur — from the cutting table to the wage voucher.
                     </p>
 
-                    <div className="animate-rise mt-9 flex flex-wrap justify-center gap-2.5 lg:justify-start"
-                        style={{ animationDelay: '230ms' }}>
+                    <div className="mt-9 flex flex-wrap justify-center gap-2.5 lg:justify-start">
                         {FEATURES.map(([a, b]) => (
                             <div key={a}
                                 className="rounded-xl border border-white/15 bg-white/[0.06] px-4 py-2.5 text-left
@@ -115,7 +129,7 @@ export default function LoginPage() {
 
                 {/* ------------------------------------- white frosted glass card */}
                 <div className="w-full max-w-[418px] shrink-0" data-testid="login-form">
-                    <div className="animate-pop glass-white glass-edge glass-edge-light relative rounded-[26px] px-7 pb-7 pt-8">
+                    <div className="glass-white glass-edge glass-edge-light relative rounded-[26px] px-7 pb-7 pt-8">
                         <div className="relative z-[2]">
                             <div className="text-center">
                                 <h2 className="font-outfit text-[23px] font-semibold tracking-[-0.01em] text-slate-900">
@@ -175,7 +189,7 @@ export default function LoginPage() {
                                 {error && (
                                     <div
                                         role="alert"
-                                        className="animate-rise-sm flex items-start gap-2 rounded-xl border border-rose-300 bg-rose-50/90 px-3.5 py-2.5"
+                                        className="flex items-start gap-2 rounded-xl border border-rose-300 bg-rose-50/90 px-3.5 py-2.5"
                                         data-testid="login-error"
                                     >
                                         <AlertCircle size={15} className="mt-px shrink-0 text-rose-500" />

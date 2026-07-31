@@ -330,6 +330,64 @@
         50%      { transform: translate3d(5vw, 9vh, 0) scale(1.15); }
     }
 
+    /* ---------------------------------------------- logo treatment ----- */
+
+    /* Entrance: rises, settles and sharpens. The blur is what makes it read as
+       focusing into place rather than just sliding up. */
+    @keyframes v-logo-in {
+        from { opacity: 0; transform: translate3d(0, 16px, 0) scale(0.94); filter: blur(7px); }
+        to   { opacity: 1; transform: none; filter: blur(0); }
+    }
+
+    /* Barely-there drift. 7s and 7px - any faster or further and it stops
+       reading as "alive" and starts reading as "broken". */
+    @keyframes v-float {
+        0%, 100% { transform: translate3d(0, 0, 0); }
+        50%      { transform: translate3d(0, -7px, 0); }
+    }
+
+    /* Half the travel, a third slower again. At 4px over 10s it reads as the
+       mark breathing rather than sliding - the two numbers to tune if it wants
+       to be more or less noticeable. */
+    @keyframes v-float-soft {
+        0%, 100% { transform: translate3d(0, 0, 0); }
+        50%      { transform: translate3d(0, -4px, 0); }
+    }
+
+    /* Light sweeping across the mark, masked to its own shape. */
+    @keyframes v-shine {
+        0%, 55%  { transform: translateX(-130%); }
+        100%     { transform: translateX(130%); }
+    }
+
+    @keyframes v-glow {
+        0%, 100% { opacity: 0.30; transform: scale(1); }
+        50%      { opacity: 0.55; transform: scale(1.10); }
+    }
+
+    .animate-logo-in { animation: v-logo-in 900ms var(--ease-out) both; }
+    .float-slow      { animation: v-float 7s ease-in-out infinite; }
+    .float-gentle    { animation: v-float-soft 10s ease-in-out infinite; }
+    .animate-glow    { animation: v-glow 6s ease-in-out infinite; }
+
+    /* Masks a moving highlight to the silhouette of --shine-src, so the light
+       travels through the artwork instead of over a rectangle around it. */
+    .shine {
+        position: relative;
+        display: inline-block;
+    }
+    .shine::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background: linear-gradient(105deg,
+            transparent 38%, hsl(0 0% 100% / 0.55) 50%, transparent 62%);
+        -webkit-mask: var(--shine-src) center / contain no-repeat;
+        mask: var(--shine-src) center / contain no-repeat;
+        animation: v-shine 6.5s ease-in-out infinite;
+    }
+
     .aurora {
         position: absolute;
         border-radius: 9999px;
