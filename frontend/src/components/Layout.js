@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import {
     LayoutDashboard, Users, Scissors, Package, Palette, Ruler,
     ClipboardList, IndianRupee, FileBarChart, Receipt,
-    Settings, LogOut, Menu, X, UserCog, CalendarDays, Wallet, Bell, Check, History
+    Settings, LogOut, Menu, X, UserCog, CalendarDays, Wallet, Bell, Check, History, ShieldCheck
 } from 'lucide-react';
 
 /** Grouped so a 14-item sidebar reads as four short lists instead of one wall. */
@@ -23,6 +23,7 @@ const navGroups = [
             { path: '/lots', label: 'Lots', icon: Package, roles: ['admin', 'accounts'] },
             { path: '/production', label: 'Production', icon: ClipboardList, roles: ['admin', 'data_entry'] },
             { path: '/weeks', label: 'Weeks', icon: CalendarDays, roles: ['admin'] },
+            { path: '/approvals', label: 'Approvals', icon: ShieldCheck, roles: ['admin', 'accounts', 'data_entry'] },
         ],
     },
     {
@@ -68,6 +69,7 @@ export default function Layout({ children }) {
     const navigate = useNavigate();
     const [open, setOpen] = useState(false);
     const [unread, setUnread] = useState(0);
+    const [pendingApprovals, setPendingApprovals] = useState(0);
     const [notifOpen, setNotifOpen] = useState(false);
     const [notifications, setNotifications] = useState([]);
     const notifRef = useRef(null);
@@ -78,9 +80,15 @@ export default function Layout({ children }) {
                 .then(r => setUnread(r.data.count))
                 .catch(err => console.error('Notif count failed:', err));
         };
+        const loadApprovals = () => {
+            api.get('/approvals/pending-count').then(r => setPendingApprovals(r.data.count)).catch(() => {});
+        };
         loadNotifs();
-        const interval = setInterval(loadNotifs, 30000);
-        return () => clearInterval(interval);
+        loadApprovals();
+        const interval = setInterval(() => { loadNotifs(); loadApprovals(); }, 30000);
+        // the Approvals page tells us right away when it changes the count
+        window.addEventListener('approvals-changed', loadApprovals);
+        return () => { clearInterval(interval); window.removeEventListener('approvals-changed', loadApprovals); };
     }, []);
 
     // Close the notification panel on outside click / Escape rather than
@@ -183,6 +191,10 @@ export default function Layout({ children }) {
                                                 className="transition-transform duration-200 ease-out-soft group-hover:scale-110"
                                             />
                                             {item.label}
+                                            {item.path === '/approvals' && pendingApprovals > 0 && (
+                                                <span className="ml-auto grid h-4 min-w-[16px] place-items-center rounded-full bg-amber-400 px-1 text-[9px] font-bold text-amber-950"
+                                                    data-testid="approvals-badge">{pendingApprovals > 9 ? '9+' : pendingApprovals}</span>
+                                            )}
                                         </Link>
                                     );
                                 })}

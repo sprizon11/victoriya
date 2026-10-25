@@ -20,8 +20,11 @@ export default function ProductionEntryPage() {
     const { user } = useAuth();
     const isAdmin = user?.role === 'admin';
     const canViewFinancial = isAdmin || user?.can_view_financial === true;
-    const canEdit = isAdmin || user?.can_edit === true;
-    const canDelete = isAdmin || user?.can_delete === true;
+    // The API only lets administrators change entries directly (the per-user
+    // can_edit/can_delete flags don't override that), so everyone else goes
+    // through an approval request instead of a button that would answer 403.
+    const canEdit = isAdmin;
+    const canDelete = isAdmin;
 
     const [weeks, setWeeks] = useState([]);
     const [lots, setLots] = useState([]);
@@ -159,17 +162,28 @@ export default function ProductionEntryPage() {
         try {
             // The proposed quantities must travel with the request. Without them
             // an admin could "approve" it and nothing would actually change.
-            await api.post('/edit-requests', {
-                entry_type: 'production',
-                entry_id: editDialog.id,
+            await api.post('/approvals', {
+                type: 'production_edit',
+                entity_id: editDialog.id,
                 reason: editReason,
-                proposed_changes: { size_quantities: newSq },
+                payload: { size_quantities: newSq },
             });
             toast.success('Request submitted for admin approval');
             setEditDialog(null); setEditReason(''); setEditMatrix({});
         } catch (err) {
             toast.error(err.response?.data?.detail || 'Could not submit request');
         } finally { setEditBusy(false); }
+    };
+
+    const handleRequestDelete = async (entry) => {
+        const reason = window.prompt(
+            `Why should ${entry.operator_name}'s entry of ${entry.total_quantity} pcs on ${entry.date} be deleted?`);
+        if (reason === null) return;
+        if (!reason.trim()) return toast.error('A reason is required');
+        try {
+            await api.post('/approvals', { type: 'production_delete', entity_id: entry.id, reason: reason.trim() });
+            toast.success('Delete request submitted for admin approval');
+        } catch (err) { toast.error(err.response?.data?.detail || 'Could not submit request'); }
     };
 
     const handleDeleteEntry = async (entry) => {
@@ -682,11 +696,18 @@ export default function ProductionEntryPage() {
                                                                 <MessageSquare size={11} /> Request
                                                             </Button>
                                                         )}
-                                                        {canDelete && (
+                                                        {canDelete ? (
                                                             <Button variant="ghost" size="iconSm"
                                                                 className="text-slate-400 hover:bg-rose-50 hover:text-rose-600"
                                                                 onClick={() => handleDeleteEntry(e)}
                                                                 data-testid={`log-delete-${e.id}`}>
+                                                                <Trash2 size={11} />
+                                                            </Button>
+                                                        ) : (
+                                                            <Button variant="ghost" size="iconSm" title="Request deletion"
+                                                                className="text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                                                                onClick={() => handleRequestDelete(e)}
+                                                                data-testid={`log-request-delete-${e.id}`}>
                                                                 <Trash2 size={11} />
                                                             </Button>
                                                         )}
