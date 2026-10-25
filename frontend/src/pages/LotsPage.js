@@ -6,7 +6,8 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog';
-import { Plus, Eye, Trash2, Lock, Unlock, Package, Search, AlertTriangle } from 'lucide-react';
+import { Plus, Eye, Trash2, Lock, Unlock, Package, Search, AlertTriangle, Calculator, FileCheck2, CalendarCheck } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import {
     PageHeader, Panel, StatCard, EmptyState, Meter, Pill, SkeletonRows, num, inr, FieldLabel,
@@ -21,6 +22,8 @@ export default function LotsPage() {
     const [reasonDialog, setReasonDialog] = useState(null);
     const [reason, setReason] = useState('');
     const [busy, setBusy] = useState(false);
+    const [check, setCheck] = useState(null);          // the pre-close checklist for the lot being closed
+    const [yearEnd, setYearEnd] = useState(0);
     const [query, setQuery] = useState('');
     const [filter, setFilter] = useState('all');
     const navigate = useNavigate();
@@ -35,6 +38,16 @@ export default function LotsPage() {
             .finally(() => setLoading(false));
     };
     useEffect(() => { load(); }, []);
+    useEffect(() => {
+        if (!isAdmin) return;
+        api.get('/year-end').then(r => setYearEnd(r.data.lots.filter(l => !l.already_carried_to).length)).catch(() => {});
+    }, [isAdmin]);
+
+    const startClose = async (lot) => {
+        setReasonDialog({ lot, action: 'close' }); setReason(''); setCheck(null);
+        try { const r = await api.get(`/lots/${lot.id}/close-check`); setCheck(r.data); }
+        catch { setCheck({ blocks: [], warnings: [] }); }
+    };
 
     const handleDelete = async (lot) => {
         if (!window.confirm(`Delete lot ${lot.lot_number}? This cannot be undone.`)) return;
@@ -49,13 +62,18 @@ export default function LotsPage() {
     };
 
     const handleClose = async (lot) => {
+        if (check?.warnings?.length && !reason.trim()) return toast.error('Say why you are closing with open items');
         setBusy(true);
         try {
-            await api.post(`/lots/${lot.id}/close`, { reason: reason || 'Completed' });
-            toast.success(`${lot.lot_number} closed`);
+            const r = await api.post(`/lots/${lot.id}/close`, { reason: reason.trim() });
+            toast.success(`${lot.lot_number} closed. The closing report is saved.`, { duration: 6000 });
             setReasonDialog(null); setReason(''); load();
-        } catch (err) { toast.error(err.response?.data?.detail || 'Error'); }
-        finally { setBusy(false); }
+            return r;
+        } catch (err) {
+            const d = err.response?.data?.detail;
+            if (d?.code === 'close_blocked') setCheck({ blocks: d.blocks, warnings: d.warnings });
+            toast.error(typeof d === 'string' ? d : (d?.message || 'Could not close the lot'), { duration: 9000 });
+        } finally { setBusy(false); }
     };
 
     const handleReopen = async (lot) => {
@@ -98,6 +116,14 @@ export default function LotsPage() {
                     </Button>
                 )}
             />
+
+            {isAdmin && yearEnd > 0 && (
+                <div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5" data-testid="year-end-banner" role="status">
+                    <CalendarCheck size={16} className="text-amber-700" />
+                    <p className="flex-1 text-[12.5px] text-amber-900">{yearEnd} lot{yearEnd === 1 ? ' is' : 's are'} still open from an earlier financial year. Close them or carry what is left into this year.</p>
+                    <Link to="/year-end" className="rounded-md bg-amber-600 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-amber-700">Year-end wizard</Link>
+                </div>
+            )}
 
             {!loading && lots.length > 0 && (
                 <div className="stagger grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -206,10 +232,17 @@ export default function LotsPage() {
                                                             <Eye size={13} />
                                                         </Button>
                                                     )}
+                                                    <Link to={`/lots/${lot.id}/costing`} title="Costing report" aria-label={`Costing for ${lot.lot_number}`}
+                                                        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100" data-testid={`costing-${lot.id}`}>
+                                                        <Calculator size={13} /></Link>
+                                                    {lot.status === 'completed' && (
+                                                        <Link to={`/lots/${lot.id}/closure`} title="Closing report" aria-label={`Closing report for ${lot.lot_number}`}
+                                                            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100" data-testid={`closure-${lot.id}`}>
+                                                            <FileCheck2 size={13} /></Link>)}
                                                     {isAdmin && lot.status === 'active' && (
                                                         <Button variant="ghost" size="iconSm" title="Close lot"
                                                             className="text-amber-600 hover:bg-amber-50"
-                                                            onClick={() => { setReasonDialog({ lot, action: 'close' }); setReason(''); }}
+                                                            onClick={() => startClose(lot)}
                                                             data-testid={`close-lot-${lot.id}`}>
                                                             <Lock size={13} />
                                                         </Button>
@@ -250,9 +283,18 @@ export default function LotsPage() {
                     </DialogHeader>
                     <div className="space-y-2 py-1">
                         {reasonDialog?.action === 'close' ? (
-                            <p className="rounded-lg bg-amber-50 px-3 py-2 text-[12px] text-amber-800 ring-1 ring-inset ring-amber-200">
-                                Closing stops any further production entry against this lot. It can be reopened later.
-                            </p>
+                            <div className="space-y-2" data-testid="close-checklist">
+                                <p className="rounded-lg bg-slate-50 px-3 py-2 text-[12px] text-slate-600 ring-1 ring-inset ring-slate-200">
+                                    Closing stops further production entry and saves a closing report with the quantities and cost as they stand now. It can be reopened later.
+                                </p>
+                                {!check && <p className="text-[12px] text-slate-400">Checking the lot…</p>}
+                                {check?.blocks?.map((b, i) => (
+                                    <p key={i} className="flex gap-2 rounded-lg bg-rose-50 px-3 py-2 text-[12px] text-rose-700 ring-1 ring-inset ring-rose-200" data-testid="close-block">
+                                        <AlertTriangle size={13} className="mt-0.5 shrink-0" />{b}</p>))}
+                                {check?.warnings?.map((w, i) => (
+                                    <p key={i} className="flex gap-2 rounded-lg bg-amber-50 px-3 py-2 text-[12px] text-amber-800 ring-1 ring-inset ring-amber-200" data-testid="close-warning">
+                                        <AlertTriangle size={13} className="mt-0.5 shrink-0" />{w}</p>))}
+                            </div>
                         ) : (
                             <p className="flex items-start gap-2 rounded-lg bg-brand-50 px-3 py-2 text-[12px] text-brand-700 ring-1 ring-inset ring-brand/20">
                                 <AlertTriangle size={13} className="mt-0.5 shrink-0" />
@@ -261,8 +303,8 @@ export default function LotsPage() {
                         )}
                         <div>
                             <Label className="mb-1 block">
-                                <FieldLabel required={reasonDialog?.action === 'reopen'}>
-                                    {reasonDialog?.action === 'reopen' ? 'Reason for reopening' : 'Reason (optional)'}
+                                <FieldLabel required={reasonDialog?.action === 'reopen' || !!check?.warnings?.length}>
+                                    {reasonDialog?.action === 'reopen' ? 'Reason for reopening' : check?.warnings?.length ? 'Why close with these open items?' : 'Note (optional)'}
                                 </FieldLabel>
                             </Label>
                             <Input value={reason} onChange={e => setReason(e.target.value)}
@@ -274,6 +316,7 @@ export default function LotsPage() {
                         <Button variant="outline" onClick={() => setReasonDialog(null)}>Cancel</Button>
                         <Button
                             loading={busy}
+                            disabled={reasonDialog?.action === 'close' && (!check || check.blocks?.length > 0)}
                             variant={reasonDialog?.action === 'close' ? 'default' : 'default'}
                             onClick={() => reasonDialog?.action === 'close'
                                 ? handleClose(reasonDialog.lot)

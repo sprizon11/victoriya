@@ -71,6 +71,7 @@ export default function LotFormPage() {
     const [form, setForm] = useState({ style_name: '', start_date: '', target_end_date: '' });
     const [sizeChartId, setSizeChartId] = useState('');
     const [allowance, setAllowance] = useState('');
+    const [orderRate, setOrderRate] = useState('');
     const [selectedColors, setSelectedColors] = useState([]);
     const [colorSizeQty, setColorSizeQty] = useState({});
     const [lotOps, setLotOps] = useState([]);
@@ -114,6 +115,7 @@ export default function LotFormPage() {
                 setSizeChartId(lot.size_chart_id || '');
                 setAllowance(lot.allowance_pct ? String(lot.allowance_pct) : '');
                 setPostPct(lot.post_pct ? String(lot.post_pct) : '');
+                setOrderRate(lot.order_rate ? String(lot.order_rate) : '');
                 setReqs((lot.requirements || []).map(r => ({ uid: uid(), item_id: r.item_id, basis: r.basis,
                     qty: String(r.basis === 'per_piece' ? r.qty_per_piece : r.total_qty) })));
                 setSelectedColors(lot.colors?.map(c => c.name) || []);
@@ -144,10 +146,10 @@ export default function LotFormPage() {
     }, [id, isEdit]);
 
     // ---- unsaved-changes guard: a long form must not vanish on a stray click
-    const snapshot = useMemo(() => JSON.stringify({ form, sizeChartId, allowance, selectedColors, colorSizeQty, qc, postPct,
+    const snapshot = useMemo(() => JSON.stringify({ form, sizeChartId, allowance, orderRate, selectedColors, colorSizeQty, qc, postPct,
         reqs: reqs.map(r => ({ item_id: r.item_id, basis: r.basis, qty: r.qty })),
         lotOps: lotOps.map(o => ({ operation_id: o.operation_id, rate: o.rate, useSizes: o.useSizes, sizeRates: o.sizeRates,
-            extras: o.extras, operator_ids: o.operator_ids })) }), [form, sizeChartId, allowance, selectedColors, colorSizeQty, qc, postPct, reqs, lotOps]);
+            extras: o.extras, operator_ids: o.operator_ids })) }), [form, sizeChartId, allowance, orderRate, selectedColors, colorSizeQty, qc, postPct, reqs, lotOps]);
     useEffect(() => { if (loaded && initialRef.current === null) initialRef.current = snapshot; }, [loaded, snapshot]);
     const dirty = loaded && initialRef.current !== null && initialRef.current !== snapshot;
     useEffect(() => {
@@ -305,6 +307,7 @@ export default function LotFormPage() {
         const payload = {
             ...form, size_chart_id: sizeChartId, color_names: selectedColors,
             color_size_quantities: colorSizeQty, allowance_pct: parseFloat(allowance) || 0,
+            order_rate: orderRate === '' ? null : parseFloat(orderRate),
             post_pct: parseFloat(postPct) || 0,
             requirements: reqs.filter(r => r.item_id).map(r => ({ item_id: r.item_id, basis: r.basis,
                 ...(r.basis === 'per_piece' ? { qty_per_piece: parseFloat(r.qty) } : { total_qty: parseFloat(r.qty) }) })),
@@ -371,6 +374,12 @@ export default function LotFormPage() {
                                     <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Target End Date</Label>
                                     <Input type="date" value={form.target_end_date} onChange={e => setForm({ ...form, target_end_date: e.target.value })} className="mt-1" data-testid="end-date-input" />
                                 </div>
+                            </div>
+                            <div>
+                                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Price per piece (optional)</Label>
+                                <Input type="text" inputMode="decimal" value={orderRate} onChange={e => setOrderRate(rateText(e.target.value))}
+                                    placeholder="what the buyer pays" className="mt-1 w-40 font-mono" data-testid="order-rate-input" aria-describedby="order-rate-help" />
+                                <p id="order-rate-help" className="mt-1 text-[11px] text-slate-400">Only used to show profit in the costing report.</p>
                             </div>
                             <div>
                                 <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Size Chart</Label>
