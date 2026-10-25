@@ -1,5 +1,9 @@
 # Phase 7 — Landing page v2: modern, brand-blue, domain-ready
 
+> **Superseded for look and layout by `08-landing-page-v3-cinematic.md`.** The owner wants the
+> brand blue in the staff tool's sidebar, not as the website theme. Sections 1 and 9 below
+> (content rules, domain readiness) still apply.
+
 **Goal:** replace the current cream-and-navy landing page with a more modern, confident,
 fully **brand-blue** marketing site for Victoria Garments (men's and women's wear
 manufacturer, Tiruppur). Same facts, same enquiry form and backend, much better
