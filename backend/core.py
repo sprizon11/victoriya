@@ -128,6 +128,9 @@ async def get_current_user(request: Request) -> dict:
         user.setdefault("can_view_financial", user.get("role") in ["admin", "accounts"])
         if is_admin:
             user.update(can_enter=True, can_edit=True, can_delete=True, can_view_financial=True)
+        # the audit middleware reads this after the response, so every route that
+        # authenticates is attributed to a user without each one having to say so
+        request.state.user = user
         return user
     except jwt.ExpiredSignatureError:
         raise HTTPException(401, "Token expired")

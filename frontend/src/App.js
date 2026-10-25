@@ -23,6 +23,7 @@ const UsersPage = React.lazy(() => import("./pages/UsersPage"));
 
 const Landing = React.lazy(() => import('./landing/LandingPage'));
 const EnquiriesPage = React.lazy(() => import('./pages/EnquiriesPage'));
+const AuditPage = React.lazy(() => import('./pages/AuditPage'));
 const PublicLanding = () => <Suspense fallback={<div className="p-8">Victoria Garments</div>}><Landing /></Suspense>;
 
 function ProtectedRoute({ children, roles }) {
@@ -47,6 +48,7 @@ function AppRoutes() {
             <Route path="/home" element={<PublicLanding />} />
             <Route path="/" element={user ? <ProtectedRoute><Suspense fallback={<div>Loading...</div>}><DashboardPage /></Suspense></ProtectedRoute> : <PublicLanding />} />
             <Route path="/enquiries" element={<ProtectedRoute roles={['admin']}><Suspense fallback={<div>Loading...</div>}><EnquiriesPage /></Suspense></ProtectedRoute>} />
+            <Route path="/audit" element={<ProtectedRoute roles={['admin']}><Suspense fallback={<div>Loading...</div>}><AuditPage /></Suspense></ProtectedRoute>} />
             <Route path="/operators" element={<ProtectedRoute roles={['admin']}><OperatorsPage /></ProtectedRoute>} />
             <Route path="/operations" element={<ProtectedRoute roles={['admin']}><OperationsPage /></ProtectedRoute>} />
             <Route path="/colors" element={<ProtectedRoute roles={['admin']}><ColorsPage /></ProtectedRoute>} />

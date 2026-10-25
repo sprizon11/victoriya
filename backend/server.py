@@ -27,6 +27,19 @@ logger = logging.getLogger(__name__)
 
 # Config, db handle, auth helpers and numbering live in core.py (shared with feature modules).
 from core import *  # noqa: F401,F403
+from audit import router as audit_router, audit_middleware, note, log_event
+
+
+async def label_for(request, collection, oid, field="name", entity_type=None):
+    """Record what a delete/update is about *before* the document disappears."""
+    try:
+        doc = await collection.find_one({"_id": ObjectId(oid)})
+    except Exception:
+        doc = None
+    if doc:
+        note(request, entity_type=entity_type, entity_id=oid, label=str(doc.get(field, "")),
+             summary=f"{request.method} {entity_type or ''} {doc.get(field, '')}".strip())
+    return doc
 
 app = FastAPI(
     title="Victoria Unit Flow",
@@ -169,6 +182,8 @@ async def login(req: LoginRequest, response: Response, request: Request):
         if isinstance(lockout, str):
             lockout = datetime.fromisoformat(lockout)
         if datetime.now(timezone.utc) - lockout < timedelta(minutes=15):
+            await log_event(request, "auth.login_locked", entity_type="user", label=email,
+                            summary=f"Login blocked: too many attempts for {email}", outcome="denied")
             raise HTTPException(429, "Too many attempts. Try again in 15 minutes.")
         else:
             await db.login_attempts.delete_one({"identifier": identifier})
@@ -180,6 +195,8 @@ async def login(req: LoginRequest, response: Response, request: Request):
             {"$inc": {"count": 1}, "$set": {"last_attempt": datetime.now(timezone.utc).isoformat()}},
             upsert=True
         )
+        await log_event(request, "auth.login_failed", entity_type="user", label=email,
+                        summary=f"Failed login for {email}", outcome="denied")
         raise HTTPException(401, "Invalid email or password")
 
     await db.login_attempts.delete_one({"identifier": identifier})
@@ -188,12 +205,20 @@ async def login(req: LoginRequest, response: Response, request: Request):
     refresh_token = create_refresh_token(user_id)
     set_auth_cookie(response, "access_token", access_token, 28800)
     set_auth_cookie(response, "refresh_token", refresh_token, 604800)
+    await log_event(request, "auth.login", user={"id": user_id, "name": user.get("name", ""), "role": user["role"]},
+                    entity_type="user", entity_id=user_id, label=email, summary=f"{email} signed in")
     return {"id": user_id, "email": user["email"], "name": user["name"], "role": user["role"],
             "can_enter": user.get("can_enter", True), "can_edit": user.get("can_edit", False),
             "can_delete": user.get("can_delete", False), "can_view_financial": user.get("can_view_financial", False)}
 
 @api_router.post("/auth/logout")
-async def logout(response: Response):
+async def logout(response: Response, request: Request):
+    try:
+        who = await get_current_user(request)
+        await log_event(request, "auth.logout", user=who, entity_type="user", entity_id=who["id"],
+                        label=who.get("email", ""), summary=f"{who.get('email', '')} signed out")
+    except HTTPException:
+        pass        # already signed out; logging out must still succeed
     response.delete_cookie("access_token", path="/")
     response.delete_cookie("refresh_token", path="/")
     return {"message": "Logged out"}
@@ -238,6 +263,7 @@ async def create_operator(data: OperatorCreate, request: Request):
     doc = {"name": data.name, "operator_code": code, "display_name": f"{data.name} ({code})",
            "active": True, "created_at": datetime.now(timezone.utc).isoformat()}
     result = await db.operators.insert_one(doc)
+    note(request, entity_type="operator", entity_id=str(result.inserted_id), label=doc.get("display_name", ""), summary=f"Created operator " + str(doc.get("display_name", "")))
     return {"id": str(result.inserted_id), **{k: v for k, v in doc.items() if k != "_id"}}
 
 @api_router.put("/operators/{operator_id}")
@@ -251,6 +277,8 @@ async def update_operator(operator_id: str, data: OperatorUpdate, request: Reque
         op = await db.operators.find_one({"_id": ObjectId(operator_id)})
         if op:
             update["display_name"] = f"{update['name']} ({op.get('operator_code', '')})"
+    before = await label_for(request, db.operators, operator_id, "display_name", "operator")
+    note(request, before={k: before.get(k) for k in update} if before else None, after=update)
     await db.operators.update_one({"_id": ObjectId(operator_id)}, {"$set": update})
     op = await db.operators.find_one({"_id": ObjectId(operator_id)})
     return serialize_doc(op)
@@ -259,6 +287,7 @@ async def update_operator(operator_id: str, data: OperatorUpdate, request: Reque
 async def delete_operator(operator_id: str, request: Request):
     user = await get_current_user(request)
     check_role(user, ["admin"])
+    await label_for(request, db.operators, operator_id, "display_name", "operator")
     await db.operators.delete_one({"_id": ObjectId(operator_id)})
     return {"message": "Deleted"}
 
@@ -279,6 +308,7 @@ async def create_operation(data: OperationCreate, request: Request):
         raise HTTPException(400, f"Operation '{data.name}' already exists")
     doc = {"name": data.name, "active": True, "created_at": datetime.now(timezone.utc).isoformat()}
     result = await db.operations.insert_one(doc)
+    note(request, entity_type="operation", entity_id=str(result.inserted_id), label=doc.get("name", ""), summary=f"Created operation " + str(doc.get("name", "")))
     return {"id": str(result.inserted_id), "name": data.name, "active": True, "created_at": doc["created_at"]}
 
 @api_router.put("/operations/{operation_id}")
@@ -288,6 +318,8 @@ async def update_operation(operation_id: str, data: OperationUpdate, request: Re
     update = {k: v for k, v in data.model_dump().items() if v is not None}
     if not update:
         raise HTTPException(400, "No fields to update")
+    before = await label_for(request, db.operations, operation_id, "name", "operation")
+    note(request, before={k: before.get(k) for k in update} if before else None, after=update)
     await db.operations.update_one({"_id": ObjectId(operation_id)}, {"$set": update})
     op = await db.operations.find_one({"_id": ObjectId(operation_id)})
     return serialize_doc(op)
@@ -296,6 +328,7 @@ async def update_operation(operation_id: str, data: OperationUpdate, request: Re
 async def delete_operation(operation_id: str, request: Request):
     user = await get_current_user(request)
     check_role(user, ["admin"])
+    await label_for(request, db.operations, operation_id, "name", "operation")
     await db.operations.delete_one({"_id": ObjectId(operation_id)})
     return {"message": "Deleted"}
 
@@ -316,6 +349,7 @@ async def create_color(data: ColorMasterCreate, request: Request):
         raise HTTPException(400, f"Color '{data.name}' already exists")
     doc = {"name": data.name, "active": True, "created_at": datetime.now(timezone.utc).isoformat()}
     result = await db.colors_master.insert_one(doc)
+    note(request, entity_type="color", entity_id=str(result.inserted_id), label=doc.get("name", ""), summary=f"Created color " + str(doc.get("name", "")))
     return {"id": str(result.inserted_id), "name": data.name, "active": True}
 
 @api_router.put("/colors/{color_id}")
@@ -333,6 +367,7 @@ async def update_color(color_id: str, data: ColorMasterUpdate, request: Request)
 async def delete_color(color_id: str, request: Request):
     user = await get_current_user(request)
     check_role(user, ["admin"])
+    await label_for(request, db.colors_master, color_id, "name", "color")
     await db.colors_master.delete_one({"_id": ObjectId(color_id)})
     return {"message": "Deleted"}
 
@@ -353,6 +388,7 @@ async def create_size_chart(data: SizeChartCreate, request: Request):
         raise HTTPException(400, f"Size chart '{data.name}' already exists")
     doc = {"name": data.name, "sizes": data.sizes, "active": True, "created_at": datetime.now(timezone.utc).isoformat()}
     result = await db.size_charts.insert_one(doc)
+    note(request, entity_type="size_chart", entity_id=str(result.inserted_id), label=doc.get("name", ""), summary=f"Created size_chart " + str(doc.get("name", "")))
     return {"id": str(result.inserted_id), "name": data.name, "sizes": data.sizes, "active": True}
 
 @api_router.put("/size-charts/{chart_id}")
@@ -370,6 +406,7 @@ async def update_size_chart(chart_id: str, data: SizeChartUpdate, request: Reque
 async def delete_size_chart(chart_id: str, request: Request):
     user = await get_current_user(request)
     check_role(user, ["admin"])
+    await label_for(request, db.size_charts, chart_id, "name", "size_chart")
     await db.size_charts.delete_one({"_id": ObjectId(chart_id)})
     return {"message": "Deleted"}
 
@@ -392,6 +429,7 @@ async def create_week(data: WeekCreate, request: Request):
     doc = {"week_number": data.week_number, "year": data.year, "start_date": data.start_date,
            "end_date": data.end_date, "created_at": datetime.now(timezone.utc).isoformat()}
     result = await db.weeks.insert_one(doc)
+    note(request, entity_type="week", entity_id=str(result.inserted_id), label=f"Week {doc.get('week_number')}/{doc.get('year')}", summary=f"Created week " + str(f"Week {doc.get('week_number')}/{doc.get('year')}"))
     return {"id": str(result.inserted_id), **{k: v for k, v in doc.items() if k != "_id"}}
 
 @api_router.post("/weeks/generate")
@@ -422,6 +460,7 @@ async def delete_week(week_id: str, request: Request):
     has_entries = await db.production_entries.count_documents({"week_id": week_id})
     if has_entries > 0:
         raise HTTPException(400, "Cannot delete week with production entries")
+    await label_for(request, db.weeks, week_id, "week_number", "week")
     await db.weeks.delete_one({"_id": ObjectId(week_id)})
     return {"message": "Deleted"}
 
@@ -541,6 +580,8 @@ async def create_lot(data: LotCreate, request: Request):
     result = await db.lots.insert_one(doc)
     doc["id"] = str(result.inserted_id)
     doc.pop("_id", None)
+    note(request, entity_type="lot", entity_id=doc["id"], label=lot_number,
+         summary=f"Created lot {lot_number} ({data.style_name})")
     return await enrich_lot(doc)
 
 @api_router.get("/lots/{lot_id}")
@@ -586,8 +627,12 @@ async def update_lot(lot_id: str, data: LotUpdate, request: Request):
         update["operations"] = operations
     if not update:
         raise HTTPException(400, "No fields to update")
+    prior = await db.lots.find_one({"_id": ObjectId(lot_id)})
     await db.lots.update_one({"_id": ObjectId(lot_id)}, {"$set": update})
     lot = await db.lots.find_one({"_id": ObjectId(lot_id)})
+    note(request, entity_type="lot", entity_id=lot_id, label=lot.get("lot_number", ""),
+         summary=f"Updated lot {lot.get('lot_number','')}: " + ", ".join(update.keys()),
+         before={k: prior.get(k) for k in update} if prior else None, after=update)
     lot = serialize_doc(lot)
     return await enrich_lot(lot)
 
@@ -600,6 +645,7 @@ async def delete_lot(lot_id: str, request: Request):
     # payroll history: advances stayed adjusted against earnings that no longer
     # existed, so re-running a past week no longer matched what was paid.
     # `delete_week` already refuses in this situation; lots now behave the same.
+    await label_for(request, db.lots, lot_id, "lot_number", "lot")
     entry_count = await db.production_entries.count_documents({"lot_id": lot_id})
     if entry_count > 0:
         raise HTTPException(400,
@@ -614,6 +660,9 @@ async def close_lot(lot_id: str, request: Request):
     check_role(user, ["admin"])
     body = await request.json()
     reason = body.get("reason", "")
+    closing = await label_for(request, db.lots, lot_id, "lot_number", "lot")
+    note(request, summary=f"Closed lot {closing.get('lot_number','') if closing else ''}. {reason}".strip(),
+         after={"status": "completed", "reason": reason})
     await db.lots.update_one({"_id": ObjectId(lot_id)}, {"$set": {
         "status": "completed", "closed_by": user["id"], "closed_by_name": user.get("name", ""),
         "closed_at": datetime.now(timezone.utc).isoformat(), "close_reason": reason
@@ -630,6 +679,9 @@ async def reopen_lot(lot_id: str, request: Request):
     reason = body.get("reason", "")
     if not reason:
         raise HTTPException(400, "Reason is required to reopen a lot")
+    reopening = await label_for(request, db.lots, lot_id, "lot_number", "lot")
+    note(request, summary=f"Reopened lot {reopening.get('lot_number','') if reopening else ''}: {reason}",
+         after={"status": "active", "reason": reason})
     await db.lots.update_one({"_id": ObjectId(lot_id)}, {"$set": {
         "status": "active", "reopened_by": user["id"], "reopened_by_name": user.get("name", ""),
         "reopened_at": datetime.now(timezone.utc).isoformat(), "reopen_reason": reason
@@ -798,12 +850,23 @@ async def create_production_batch(data: ProductionBatchCreate, request: Request)
         doc["id"] = str(result.inserted_id)
         doc.pop("_id", None)
         saved.append(doc)
+    note(request, entity_type="production", entity_id=data.lot_id, label=f"{lot['lot_number']} {op_info['operation_name']} {data.color}",
+         summary=f"Saved {len(saved)} production entries ({sum(e['total_quantity'] for e in saved)} pcs) for {data.date}",
+         after={"entries": [{"operator": e["operator_name"], "qty": e["total_quantity"], "earnings": e["total_earnings"]} for e in saved],
+                "duplicates_skipped": dup_warnings})
     return {"saved": len(saved), "entries": saved, "duplicates_skipped": dup_warnings}
 
 @api_router.delete("/production/{entry_id}")
 async def delete_production(entry_id: str, request: Request):
     user = await get_current_user(request)
     check_role(user, ["admin"])
+    gone = await db.production_entries.find_one({"_id": ObjectId(entry_id)})
+    if gone:
+        note(request, entity_type="production", entity_id=entry_id,
+             label=f"{gone.get('lot_number','')} {gone.get('operation_name','')} {gone.get('operator_name','')} {gone.get('date','')}",
+             summary=f"Deleted {gone.get('total_quantity', 0)} pcs entry by {gone.get('operator_name','')}",
+             before={"size_quantities": gone.get("size_quantities"), "total_quantity": gone.get("total_quantity"),
+                     "total_earnings": gone.get("total_earnings"), "date": gone.get("date")})
     await db.production_entries.delete_one({"_id": ObjectId(entry_id)})
     return {"message": "Deleted"}
 
@@ -849,6 +912,10 @@ async def edit_production(entry_id: str, request: Request):
                  "modified_by_name": user.get("name", ""), "modified_at": datetime.now(timezone.utc).isoformat()},
         "$push": {"edit_history": audit}
     })
+    note(request, entity_type="production", entity_id=entry_id,
+         label=f"{entry.get('lot_number','')} {entry.get('operation_name','')} {entry.get('operator_name','')} {entry.get('date','')}",
+         summary=f"Edited entry: {old_values['total_quantity']} -> {new_total} pcs. {body.get('reason','')}".strip(),
+         before=old_values, after={"size_quantities": new_sq, "total_quantity": new_total})
     return {"message": "Entry updated", "audit": audit}
 
 # ===== PUBLIC ENQUIRIES =====
@@ -1002,6 +1069,7 @@ async def create_advance(data: AdvanceCreate, request: Request):
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     result = await db.advances.insert_one(doc)
+    note(request, entity_type="advance", entity_id=str(result.inserted_id), label=doc.get("voucher_number", ""), summary=f"Created advance " + str(doc.get("voucher_number", "")))
     await db.notifications.insert_one({"type": "advance_created", "read": False,
         "message": f"Advance {voucher_num} - {operator['name']} ({operator.get('operator_code','')}) - Rs.{data.amount}",
         "created_at": datetime.now(timezone.utc).isoformat()})
@@ -1037,6 +1105,10 @@ async def adjust_advance(advance_id: str, data: AdvanceAdjust, request: Request)
 async def delete_advance(advance_id: str, request: Request):
     user = await get_current_user(request)
     check_role(user, ["admin"])
+    adv = await label_for(request, db.advances, advance_id, "voucher_number", "advance")
+    if adv:
+        note(request, before={"operator": adv.get("operator_name"), "amount": adv.get("amount"),
+                              "balance": adv.get("balance"), "status": adv.get("status")})
     await db.advances.delete_one({"_id": ObjectId(advance_id)})
     return {"message": "Deleted"}
 
@@ -1815,6 +1887,9 @@ async def get_settings(request: Request):
 async def update_setting(key: str, data: SettingUpdate, request: Request):
     user = await get_current_user(request)
     check_role(user, ["admin"])
+    prior = await db.system_settings.find_one({"key": key})
+    note(request, entity_type="setting", entity_id=key, label=key, summary=f"Changed setting {key}",
+         before={"value": prior.get("value") if prior else None}, after={"value": data.value})
     await db.system_settings.update_one({"key": key}, {"$set": {"value": data.value}}, upsert=True)
     return {"key": key, "value": data.value}
 
@@ -1829,6 +1904,7 @@ async def reset_all_data(request: Request):
                             "weeks", "lots", "production_entries", "advances",
                             "notifications", "edit_requests", "counters", "system_settings", "login_attempts",
                             "enquiries", "rate_limits"]
+    note(request, entity_type="system", summary="ALL DATA RESET by admin (audit log is kept)")
     cleared = []
     for col in collections_to_clear:
         await db[col].drop()
@@ -1864,6 +1940,7 @@ async def create_user(data: UserCreate, request: Request):
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     result = await db.users.insert_one(doc)
+    note(request, entity_type="user", entity_id=str(result.inserted_id), label=doc.get("email", ""), summary=f"Created user " + str(doc.get("email", "")))
     return {"id": str(result.inserted_id), "email": doc["email"], "name": doc["name"],
             "role": doc["role"], "active": True, "can_enter": doc["can_enter"],
             "can_edit": doc["can_edit"], "can_delete": doc["can_delete"],
@@ -1876,6 +1953,8 @@ async def update_user(user_id: str, data: UserUpdate, request: Request):
     update = {k: v for k, v in data.model_dump().items() if v is not None}
     if not update:
         raise HTTPException(400, "No fields to update")
+    prior = await label_for(request, db.users, user_id, "email", "user")
+    note(request, before={k: prior.get(k) for k in update} if prior else None, after=update)
     await db.users.update_one({"_id": ObjectId(user_id)}, {"$set": update})
     u = await db.users.find_one({"_id": ObjectId(user_id)}, {"password_hash": 0})
     return serialize_doc(u)
@@ -1886,6 +1965,7 @@ async def delete_user(user_id: str, request: Request):
     check_role(user, ["admin"])
     if user_id == user["id"]:
         raise HTTPException(400, "Cannot delete yourself")
+    await label_for(request, db.users, user_id, "email", "user")
     await db.users.delete_one({"_id": ObjectId(user_id)})
     return {"message": "Deleted"}
 
@@ -1897,6 +1977,8 @@ async def change_user_password(user_id: str, request: Request):
     new_password = body.get("new_password", "")
     if len(new_password) < 4:
         raise HTTPException(400, "Password must be at least 4 characters")
+    await label_for(request, db.users, user_id, "email", "user")
+    note(request, summary="Password changed")   # the value itself is never logged
     await db.users.update_one({"_id": ObjectId(user_id)}, {"$set": {"password_hash": hash_password(new_password)}})
     return {"message": "Password changed"}
 
@@ -1957,6 +2039,10 @@ async def seed_settings():
 async def startup():
     await db.users.create_index("email", unique=True)
     await db.login_attempts.create_index("identifier")
+    await db.audit_logs.create_index([("at", -1)])
+    await db.audit_logs.create_index([("entity_type", 1), ("entity_id", 1)])
+    await db.audit_logs.create_index("user_id")
+    await db.audit_logs.create_index("action")
     await db.rate_limits.create_index("expires_at", expireAfterSeconds=0)
     await db.enquiries.create_index("created_at")
     await db.production_entries.create_index([("week_number", 1), ("year", 1)])
@@ -1987,6 +2073,8 @@ async def health():
         raise HTTPException(503, f"Database unreachable: {exc}")
 
 app.include_router(api_router)
+app.include_router(audit_router)
+app.middleware("http")(audit_middleware)
 
 # ===== CORS =====
 # Was allow_origin_regex=r"https?://.*" with credentials, i.e. any site on the
