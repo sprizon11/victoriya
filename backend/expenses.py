@@ -325,7 +325,7 @@ async def export_expenses(request: Request, date_from: Optional[str] = None, dat
     for e in await db.expenses.find(_filter(date_from, date_to, category_id, vendor, payment_status, lot_id, status, q)).sort("date", 1).to_list(20000):
         bal = round(max(0, e["total"] - e.get("paid_amount", 0)), 2)
         # a leading = + - @ would make Excel run the cell as a formula
-        safe = lambda v: ("'" + v) if isinstance(v, str) and v[:1] in "=+-@" else v
+        safe = lambda v: ("'" + v) if isinstance(v, str) and v.startswith(("=", "+", "-", "@")) else v
         ws.append([e["voucher_no"], e["date"], e["category_name"], safe(e["vendor"]), safe(e.get("bill_no", "")), safe(e.get("description", "")),
                    e.get("lot_number", ""), e["amount"], e["gst_amount"], e["total"], e.get("paid_amount", 0), bal, e["status"]])
         if e["status"] not in ("void", "rejected"):

@@ -173,7 +173,7 @@ async def export_audit_logs(request: Request, user: Optional[str] = None, action
         cells = [r.get("at", ""), r.get("user_name", ""), r.get("role", ""), r.get("action", ""),
                  r.get("outcome", ""), r.get("entity_type", ""), r.get("entity_id", ""),
                  r.get("entity_label", ""), r.get("summary", ""), r.get("ip", "")]
-        writer.writerow([("'" + c) if isinstance(c, str) and c[:1] in "=+-@" else c for c in cells])
+        writer.writerow([("'" + c) if isinstance(c, str) and c.startswith(("=", "+", "-", "@")) else c for c in cells])
     buf.seek(0)
     return StreamingResponse(iter([buf.getvalue()]), media_type="text/csv",
                              headers={"Content-Disposition": "attachment; filename=activity_log.csv"})

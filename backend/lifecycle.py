@@ -357,7 +357,7 @@ def _xlsx(sheets):
                 ws.cell(row=1, column=i).font = Font(bold=True, color="FFFFFF")
                 ws.cell(row=1, column=i).fill = PatternFill(start_color="294F96", end_color="294F96", fill_type="solid")
         for r in rows:
-            ws.append(["'" + c if isinstance(c, str) and c[:1] in "=+-@" else c for c in r])
+            ws.append(["'" + c if isinstance(c, str) and c.startswith(("=", "+", "-", "@")) else c for c in r])
     out = io.BytesIO()
     wb.save(out)
     out.seek(0)

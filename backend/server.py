@@ -36,6 +36,7 @@ import purchasing
 import lifecycle
 import mailer
 import dashboard
+import salary
 import dna
 import expenses
 from purchasing import RequirementIn, build_requirements, clean_post_pct, lot_planned_total, generate_pos_for_lot
@@ -2465,7 +2466,7 @@ async def reset_all_data(request: Request):
                             "notifications", "edit_requests", "counters", "system_settings", "login_attempts",
                             "enquiries", "rate_limits", "approvals", "operator_groups", "operation_groups", "rate_types",
                             "stock_items", "suppliers", "stock_movements", "purchase_orders", "expense_categories", "expenses",
-                            "bills.files", "bills.chunks", "lot_closures"]
+                            "bills.files", "bills.chunks", "lot_closures", "salary_workers", "salary_departments", "salary_entries"]
     note(request, entity_type="system", summary="ALL DATA RESET by admin (audit log is kept)")
     cleared = []
     for col in collections_to_clear:
@@ -2618,6 +2619,9 @@ async def startup():
     await db.expenses.create_index("lot_id")
     await db.lot_closures.create_index([("lot_id", 1), ("version", -1)])
     await db.scheduler_state.create_index("report", unique=True)
+    await db.salary_entries.create_index([("week_start", 1), ("worker_id", 1)], unique=True)
+    await db.salary_entries.create_index("worker_id")
+    await db.salary_workers.create_index("name")
     await db.email_log.create_index([("at", -1)])
     await db.operators.create_index("group_id")
     await db.operations.create_index("group_id")
@@ -2663,6 +2667,7 @@ app.include_router(purchasing.router)
 app.include_router(lifecycle.router)
 app.include_router(mailer.router)
 app.include_router(dashboard.router)
+app.include_router(salary.router)
 app.include_router(dna.router)
 app.include_router(expenses.router)
 app.middleware("http")(audit_middleware)
