@@ -28,6 +28,8 @@ logger = logging.getLogger(__name__)
 # Config, db handle, auth helpers and numbering live in core.py (shared with feature modules).
 from core import *  # noqa: F401,F403
 from audit import router as audit_router, audit_middleware, note, log_event
+import approvals
+from approvals import ApprovalExpired, record_auto
 
 
 async def label_for(request, collection, oid, field="name", entity_type=None):
@@ -552,7 +554,7 @@ async def create_lot(data: LotCreate, request: Request):
         color_data = data.color_size_quantities.get(cname, {})
         size_entries = []
         for sz in sizes:
-            qty = int(color_data.get(sz, 0))
+            qty = plan_qty(color_data.get(sz, 0))
             size_entries.append({"size": sz, "planned_qty": qty})
         colors.append({"color_id": str(uuid.uuid4()), "name": cname, "sizes": size_entries})
     operations = []
@@ -593,23 +595,75 @@ async def get_lot(lot_id: str, request: Request):
     lot = serialize_doc(lot)
     return await enrich_lot(lot)
 
+def plan_qty(value) -> int:
+    """A grid cell as a whole, non-negative number of pieces. The lot form sends
+    strings, and a cleared cell arrives as "" -- int("") used to raise a 500."""
+    try:
+        n = int(float(str(value).strip() or 0))
+    except (TypeError, ValueError):
+        raise HTTPException(400, f"'{value}' is not a valid quantity")
+    if n < 0:
+        raise HTTPException(400, "Quantities cannot be negative")
+    return n
+
+
+async def produced_by_cell(lot_id: str):
+    """{(colour, size): most pieces any single operation has produced}.
+    Every operation covers every piece, so the plan can never drop below the
+    busiest operation. Also returns the set of operations that have entries."""
+    per_op, ops_used = {}, set()
+    async for e in db.production_entries.find({"lot_id": lot_id}, {"color": 1, "operation_id": 1, "size_quantities": 1}):
+        ops_used.add(e.get("operation_id"))
+        for sz, qty in (e.get("size_quantities") or {}).items():
+            key = (e.get("color", ""), sz, e.get("operation_id"))
+            per_op[key] = per_op.get(key, 0) + qty
+    cell = {}
+    for (color, sz, _op), qty in per_op.items():
+        cell[(color, sz)] = max(cell.get((color, sz), 0), qty)
+    return cell, ops_used
+
+
 @api_router.put("/lots/{lot_id}")
 async def update_lot(lot_id: str, data: LotUpdate, request: Request):
     user = await get_current_user(request)
     check_role(user, ["admin"])
+    if not ObjectId.is_valid(lot_id):
+        raise HTTPException(404, "Lot not found")
+    prior = await db.lots.find_one({"_id": ObjectId(lot_id)})
+    if not prior:
+        raise HTTPException(404, "Lot not found")
     update = {}
     for field in ["style_name", "start_date", "target_end_date", "status"]:
         val = getattr(data, field)
         if val is not None:
             update[field] = val
+
+    produced_cell, ops_used = await produced_by_cell(lot_id)
+    has_production = bool(ops_used)
+
     if data.color_size_quantities is not None:
-        lot = await db.lots.find_one({"_id": ObjectId(lot_id)})
-        sizes = lot.get("sizes", [])
-        colors = []
+        sizes = prior.get("sizes", [])
+        old_colors = {c["name"]: c for c in prior.get("colors", [])}
+        colors, problems = [], []
         for cname, size_data in data.color_size_quantities.items():
-            size_entries = [{"size": sz, "planned_qty": int(size_data.get(sz, 0))} for sz in sizes]
-            colors.append({"color_id": str(uuid.uuid4()), "name": cname, "sizes": size_entries})
+            size_entries = []
+            for sz in sizes:
+                qty = plan_qty((size_data or {}).get(sz, 0))
+                done = produced_cell.get((cname, sz), 0)
+                if qty < done:
+                    problems.append(f"{cname} {sz}: plan {qty} is below the {done} already produced")
+                size_entries.append({"size": sz, "planned_qty": qty})
+            # keep the id of a colour that already exists; it used to be regenerated on every save
+            color_id = (old_colors.get(cname) or {}).get("color_id") or str(uuid.uuid4())
+            colors.append({"color_id": color_id, "name": cname, "sizes": size_entries})
+        kept = {c["name"] for c in colors}
+        for (cname, _sz), done in produced_cell.items():
+            if cname not in kept and done > 0:
+                problems.append(f"Colour {cname} cannot be removed: pieces are already recorded against it")
+        if problems:
+            raise HTTPException(400, "; ".join(sorted(set(problems))))
         update["colors"] = colors
+
     if data.operations is not None:
         operations = []
         for op_entry in data.operations:
@@ -624,15 +678,48 @@ async def update_lot(lot_id: str, data: LotUpdate, request: Request):
                                       "operator_code": operator.get("operator_code", "")})
             operations.append({"operation_id": op_entry.operation_id, "operation_name": operation["name"],
                                "rate": op_entry.rate, "operators": operators})
+        dropped = ops_used - {o["operation_id"] for o in operations}
+        if dropped:
+            names = [o.get("operation_name") for o in prior.get("operations", []) if o["operation_id"] in dropped]
+            raise HTTPException(400, f"Operation {', '.join(map(str, names)) or ''} cannot be removed: "
+                                     "production is already recorded against it")
         update["operations"] = operations
     if not update:
         raise HTTPException(400, "No fields to update")
-    prior = await db.lots.find_one({"_id": ObjectId(lot_id)})
+
+    # what actually changed, so the approval record and the log say something useful
+    def plan_view(cols):
+        return {c["name"]: {s["size"]: s["planned_qty"] for s in c.get("sizes", [])} for c in cols or []}
+    def rate_view(ops):
+        return {o.get("operation_name", ""): o.get("rate") for o in ops or []}
+    plan_changed = "colors" in update and plan_view(update["colors"]) != plan_view(prior.get("colors"))
+    rates_changed = "operations" in update and rate_view(update["operations"]) != rate_view(prior.get("operations"))
+    operators_changed = "operations" in update and (
+        {o["operation_id"]: sorted(x["operator_id"] for x in o.get("operators", [])) for o in update["operations"]}
+        != {o["operation_id"]: sorted(x["operator_id"] for x in o.get("operators", [])) for o in prior.get("operations", [])})
+
     await db.lots.update_one({"_id": ObjectId(lot_id)}, {"$set": update})
     lot = await db.lots.find_one({"_id": ObjectId(lot_id)})
-    note(request, entity_type="lot", entity_id=lot_id, label=lot.get("lot_number", ""),
-         summary=f"Updated lot {lot.get('lot_number','')}: " + ", ".join(update.keys()),
-         before={k: prior.get(k) for k in update} if prior else None, after=update)
+    label = lot.get("lot_number", "")
+
+    approval_id = None
+    if has_production:
+        if rates_changed:
+            approval_id = await record_auto(
+                request, user, "rate_change", "lot", lot_id, label,
+                f"Rates changed on {label} after production started (affects entries from now on)",
+                before=rate_view(prior.get("operations")), after=rate_view(update["operations"]))
+        if plan_changed or operators_changed:
+            approval_id = await record_auto(
+                request, user, "lot_edit_after_production", "lot", lot_id, label,
+                f"{label} edited after production started",
+                before={"plan": plan_view(prior.get("colors"))} if plan_changed else None,
+                after={"plan": plan_view(update["colors"])} if plan_changed else None) or approval_id
+
+    note(request, entity_type="lot", entity_id=lot_id, label=label, approval_id=approval_id,
+         summary=f"Updated lot {label}: " + ", ".join(update.keys()),
+         before={k: prior.get(k) for k in update if k in ("style_name", "start_date", "target_end_date", "status")} or None,
+         after={k: v for k, v in update.items() if k in ("style_name", "start_date", "target_end_date", "status")} or None)
     lot = serialize_doc(lot)
     return await enrich_lot(lot)
 
@@ -680,8 +767,12 @@ async def reopen_lot(lot_id: str, request: Request):
     if not reason:
         raise HTTPException(400, "Reason is required to reopen a lot")
     reopening = await label_for(request, db.lots, lot_id, "lot_number", "lot")
+    reopen_id = await record_auto(request, user, "lot_reopen", "lot", lot_id,
+                                  reopening.get("lot_number", "") if reopening else "",
+                                  f"Reopened {reopening.get('lot_number', '') if reopening else ''}: {reason}",
+                                  before={"status": "completed"}, after={"status": "active"}, reason=reason)
     note(request, summary=f"Reopened lot {reopening.get('lot_number','') if reopening else ''}: {reason}",
-         after={"status": "active", "reason": reason})
+         after={"status": "active", "reason": reason}, approval_id=reopen_id)
     await db.lots.update_one({"_id": ObjectId(lot_id)}, {"$set": {
         "status": "active", "reopened_by": user["id"], "reopened_by_name": user.get("name", ""),
         "reopened_at": datetime.now(timezone.utc).isoformat(), "reopen_reason": reason
@@ -998,7 +1089,113 @@ async def update_enquiry(enquiry_id: str, data: EnquiryStatus, request: Request)
 
 
 def notification_scope(user):
-    return {} if user["role"] == "admin" else {"audience": {"$ne": "admin"}}
+    """Who sees which notification. `audience` is absent (everyone), "admin", or
+    "user:<id>" for a note addressed to one person, e.g. a decision on their request."""
+    mine = {"audience": f"user:{user['id']}"}
+    if user["role"] == "admin":
+        return {"$or": [{"audience": {"$exists": False}}, {"audience": {"$in": ["admin", "all"]}}, mine]}
+    return {"$or": [{"audience": {"$exists": False}}, {"audience": "all"}, mine]}
+
+
+# ===== APPROVAL HANDLERS =====
+# What each approvable action means. approvals.py stays generic; these know about
+# production entries. Both re-run the normal rules instead of trusting the payload.
+
+def _clean_quantities(raw):
+    try:
+        sq = {k: int(v or 0) for k, v in (raw or {}).items()}
+    except (TypeError, ValueError, AttributeError):
+        raise HTTPException(400, "Quantities must be whole numbers")
+    if any(v < 0 for v in sq.values()):
+        raise HTTPException(400, "Quantities cannot be negative")
+    return {k: v for k, v in sq.items() if v > 0}
+
+
+def _entry_label(e):
+    return f"{e.get('lot_number','')} · {e.get('operation_name','')} · {e.get('operator_name','')} · {e.get('date','')}"
+
+
+def _entry_snapshot(e):
+    return {"size_quantities": e.get("size_quantities", {}), "total_quantity": e.get("total_quantity", 0),
+            "total_earnings": e.get("total_earnings", 0)}
+
+
+async def _load_entry(entry_id):
+    if not ObjectId.is_valid(entry_id):
+        raise HTTPException(404, "Entry not found")
+    entry = await db.production_entries.find_one({"_id": ObjectId(entry_id)})
+    if not entry:
+        raise HTTPException(404, "Entry not found")
+    return entry
+
+
+async def prepare_production_edit(user, entry_id, payload):
+    entry = await _load_entry(entry_id)
+    new_sq = _clean_quantities((payload or {}).get("size_quantities"))
+    if not new_sq:
+        raise HTTPException(400, "Enter the corrected quantities you are requesting")
+    lot = await db.lots.find_one({"_id": ObjectId(entry["lot_id"])})
+    if not lot:
+        raise HTTPException(400, "The lot for this entry no longer exists")
+    if lot.get("status") == "completed":
+        raise HTTPException(400, "This lot is closed. An administrator must reopen it before entries can change.")
+    await assert_within_plan(lot, entry.get("color", ""), entry.get("operation_id", ""), new_sq, exclude_entry_id=entry_id)
+    return _entry_label(entry), {"size_quantities": new_sq}, _entry_snapshot(entry)
+
+
+async def apply_production_edit(approval, reviewer, request):
+    try:
+        entry = await _load_entry(approval["entity_id"])
+    except HTTPException:
+        raise ApprovalExpired("The entry no longer exists")
+    snap = approval.get("snapshot")
+    if snap and (snap.get("size_quantities") != entry.get("size_quantities", {})
+                 or snap.get("total_quantity") != entry.get("total_quantity", 0)):
+        raise ApprovalExpired("The entry was changed after this request was made. Ask for a fresh request.")
+    new_sq = _clean_quantities((approval.get("payload") or {}).get("size_quantities"))
+    if not new_sq:
+        raise HTTPException(400, "This request carries no quantities to apply. Reject it.")
+    lot = await db.lots.find_one({"_id": ObjectId(entry["lot_id"])})
+    if not lot:
+        raise HTTPException(400, "The lot for this entry no longer exists")
+    if lot.get("status") == "completed":
+        raise HTTPException(400, "This lot is closed. Reopen it before approving.")
+    await assert_within_plan(lot, entry.get("color", ""), entry.get("operation_id", ""), new_sq,
+                             exclude_entry_id=approval["entity_id"])
+    new_total = sum(new_sq.values())
+    new_earnings = round(new_total * entry.get("rate", 0), 2)      # money always recomputed here
+    now = datetime.now(timezone.utc).isoformat()
+    before = {"size_quantities": entry.get("size_quantities", {}), "total_quantity": entry.get("total_quantity", 0)}
+    after = {"size_quantities": new_sq, "total_quantity": new_total}
+    await db.production_entries.update_one({"_id": entry["_id"]}, {
+        "$set": {"size_quantities": new_sq, "total_quantity": new_total, "total_earnings": new_earnings,
+                 "modified_by": reviewer["id"], "modified_by_name": reviewer.get("name", ""), "modified_at": now},
+        "$push": {"edit_history": {
+            "edited_by": reviewer["id"], "edited_by_name": reviewer.get("name", ""), "edited_at": now,
+            "reason": approval.get("reason", ""), "source": "approval", "approval_id": str(approval["_id"]),
+            "requested_by_name": approval.get("requested_by_name", ""), "old_values": before, "new_values": after}}})
+    return {"before": before, "after": after, "total_earnings": new_earnings}
+
+
+async def prepare_production_delete(user, entry_id, payload):
+    entry = await _load_entry(entry_id)
+    return _entry_label(entry), {}, _entry_snapshot(entry)
+
+
+async def apply_production_delete(approval, reviewer, request):
+    try:
+        entry = await _load_entry(approval["entity_id"])
+    except HTTPException:
+        raise ApprovalExpired("The entry was already deleted")
+    snap = approval.get("snapshot")
+    if snap and snap.get("total_quantity") != entry.get("total_quantity", 0):
+        raise ApprovalExpired("The entry was changed after this request was made. Ask for a fresh request.")
+    await db.production_entries.delete_one({"_id": entry["_id"]})
+    return {"before": _entry_snapshot(entry), "after": None, "deleted": True}
+
+
+approvals.register("production_edit", prepare=prepare_production_edit, apply=apply_production_edit)
+approvals.register("production_delete", prepare=prepare_production_delete, apply=apply_production_delete)
 
 # ===== NOTIFICATION ROUTES =====
 
@@ -1209,6 +1406,9 @@ async def review_edit_request(req_id: str, request: Request):
         applied = {"total_quantity": new_total, "total_earnings": new_earnings}
 
     await db.edit_requests.update_one({"_id": ObjectId(req_id)}, {"$set": update})
+    await db.approvals.update_many({"legacy_id": req_id, "status": "pending"}, {"$set": {
+        "status": update["status"], "reviewed_by": update["reviewed_by"],
+        "reviewed_by_name": update["reviewed_by_name"], "reviewed_at": update["reviewed_at"]}})
     return {"status": update["status"], "applied": applied}
 
 # ===== PAYROLL ROUTES =====
@@ -1903,7 +2103,7 @@ async def reset_all_data(request: Request):
     collections_to_clear = ["operators", "operations", "colors_master", "size_charts",
                             "weeks", "lots", "production_entries", "advances",
                             "notifications", "edit_requests", "counters", "system_settings", "login_attempts",
-                            "enquiries", "rate_limits"]
+                            "enquiries", "rate_limits", "approvals"]
     note(request, entity_type="system", summary="ALL DATA RESET by admin (audit log is kept)")
     cleared = []
     for col in collections_to_clear:
@@ -2043,6 +2243,9 @@ async def startup():
     await db.audit_logs.create_index([("entity_type", 1), ("entity_id", 1)])
     await db.audit_logs.create_index("user_id")
     await db.audit_logs.create_index("action")
+    await db.approvals.create_index([("status", 1), ("requested_at", -1)])
+    await db.approvals.create_index("requested_by")
+    await db.approvals.create_index("legacy_id", unique=True, sparse=True)
     await db.rate_limits.create_index("expires_at", expireAfterSeconds=0)
     await db.enquiries.create_index("created_at")
     await db.production_entries.create_index([("week_number", 1), ("year", 1)])
@@ -2074,6 +2277,7 @@ async def health():
 
 app.include_router(api_router)
 app.include_router(audit_router)
+app.include_router(approvals.router)
 app.middleware("http")(audit_middleware)
 
 # ===== CORS =====
