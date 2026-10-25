@@ -1,10 +1,12 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+jest.mock('framer-motion', () => ({ ...jest.requireActual('framer-motion'), useReducedMotion: jest.fn(() => false) }));
 jest.mock('react-router-dom', () => ({
   Link: ({ to, children, ...props }) => <a href={to} {...props}>{children}</a>,
 }));
 import { content } from './content';
 import LandingPage from './LandingPage';
+import { useReducedMotion } from 'framer-motion';
 
 const markup = () => renderToStaticMarkup(<LandingPage />);
 
@@ -38,4 +40,16 @@ test('landing colours are defined only in the token block', () => {
   const css = require('fs').readFileSync(require('path').join(__dirname, 'landing.css'), 'utf8');
   const rest = css.slice(css.indexOf('.vg-landing *'));
   expect(rest).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+});
+
+test('reduced motion renders content without inline transforms', () => {
+  useReducedMotion.mockReturnValue(true);
+  try {
+    const page = new DOMParser().parseFromString(markup(), 'text/html');
+    expect(page.querySelector('h1')?.textContent).toContain('Thoughtfully made');
+    expect(page.querySelectorAll('.vg-process-track li')).toHaveLength(5);
+    expect([...page.querySelectorAll('[style]')].filter(element => element.getAttribute('style').includes('transform')).map(element => element.outerHTML.slice(0, 200))).toEqual([]);
+  } finally {
+    useReducedMotion.mockReturnValue(false);
+  }
 });
