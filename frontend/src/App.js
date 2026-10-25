@@ -41,15 +41,17 @@ const PublicLanding = () => <Suspense fallback={<div className="p-8">Victoria Ga
 
 function ProtectedRoute({ children, roles }) {
     const { user, loading } = useAuth();
+    const location = useLocation();
     if (loading) return <div className="flex items-center justify-center h-screen text-slate-500">Loading...</div>;
-    if (!user) return <Navigate to="/login" replace />;
+    if (!user) return <Navigate to="/login" replace state={{ from: `${location.pathname}${location.search}` }} />;
     if (roles && !roles.includes(user.role)) return <Navigate to="/" replace />;
     return <Layout>{children}</Layout>;
 }
 
 function AppRoutes() {
     const { user, loading } = useAuth();
-    const { pathname } = useLocation();
+    const location = useLocation();
+    const { pathname } = location;
     useEffect(() => {
         if (pathname !== "/home" && (pathname !== "/" || user)) document.title = "Victoria Unit Flow";
     }, [pathname, user]);
@@ -57,7 +59,7 @@ function AppRoutes() {
 
     return (
         <Routes>
-            <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
+            <Route path="/login" element={user ? <Navigate to={location.state?.from || '/'} replace /> : <LoginPage />} />
             <Route path="/home" element={<PublicLanding />} />
             <Route path="/" element={user ? <ProtectedRoute><Suspense fallback={<div>Loading...</div>}><DashboardPage /></Suspense></ProtectedRoute> : <PublicLanding />} />
             <Route path="/enquiries" element={<ProtectedRoute roles={['admin']}><Suspense fallback={<div>Loading...</div>}><EnquiriesPage /></Suspense></ProtectedRoute>} />

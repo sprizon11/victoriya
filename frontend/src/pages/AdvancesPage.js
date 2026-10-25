@@ -18,7 +18,7 @@ import {
 const inr0 = (n) => (Number(n) || 0).toLocaleString('en-IN',
     { style: 'currency', currency: 'INR', maximumFractionDigits: 0 });
 
-const LOGO = "/victoria-logo-mark.png";
+const LOGO = "/victoria-logo-color.svg";
 const CO = { name: "Victoria Garments", address: "317/4b,4c,Sri Nagar, Kumarasamy Nagar (East), Pitchampalayam Pudur (PO), Tiruppur - 641603", phone: "0421-2479137", email: "info@victoriagarments.in" };
 
 export default function AdvancesPage() {

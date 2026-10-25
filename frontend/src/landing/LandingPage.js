@@ -32,7 +32,7 @@ export default function LandingPage() {
   }
   return <div className="vg-landing">
     <a className="vg-skip" href="#main" data-testid="landing-skip">{c.skip}</a>
-    <header className="vg-header"><a href="#" aria-label={c.name} data-testid="landing-logo"><img src="/victoria-logo-mark-blue.png" width="190" height="40" alt={c.name} /></a>
+    <header className="vg-header"><a href="#" aria-label={c.name} data-testid="landing-logo"><img src="/victoria-logo-color.svg" width="190" height="40" alt={c.name} /></a>
       <nav aria-label="Main navigation">{c.nav.map(([id, text]) => <a key={id} href={`#${id}`} data-testid={`nav-${id}`}>{text}</a>)}</nav>
       <Link className="vg-staff" to="/login" data-testid="landing-staff">{c.staff}</Link>
       <a className="vg-button vg-nav-quote" href="#contact" data-testid="nav-quote">{c.quote}<ArrowUpRight size={16}/></a>
@@ -57,6 +57,6 @@ export default function LandingPage() {
         </form>
       </section>
     </main>
-    <footer><img src="/victoria-logo-mark-blue.png" width="160" height="34" alt={c.name}/><span>© {new Date().getFullYear()} {c.copyright}</span><Link to="/login" data-testid="footer-staff">{c.staff}</Link></footer>
+    <footer><img src="/victoria-logo-color.svg" width="160" height="34" alt={c.name}/><span>© {new Date().getFullYear()} {c.copyright}</span><Link to="/login" data-testid="footer-staff">{c.staff}</Link></footer>
   </div>;
 }

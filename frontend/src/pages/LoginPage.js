@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Label } from '../components/ui/label';
 import { Mail, Lock, Eye, EyeOff, AlertCircle, ArrowRight } from 'lucide-react';
@@ -28,6 +28,7 @@ const FEATURES = [
 export default function LoginPage() {
     const { login } = useAuth();
     const navigate = useNavigate();
+    const location = useLocation();
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [showPw, setShowPw] = useState(false);
@@ -40,7 +41,7 @@ export default function LoginPage() {
         setLoading(true);
         try {
             await login(email, password);
-            navigate('/');
+            navigate(location.state?.from || '/', { replace: true });
         } catch (err) {
             setError(formatError(err.response?.data?.detail) || err.message);
         } finally {

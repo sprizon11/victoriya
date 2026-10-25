@@ -76,7 +76,8 @@ const navGroups = [
 // Trimmed marks. The original artwork is a 1394x711 canvas holding a 958x199
 // logo, so ~62% of the file is empty margin -- `object-contain` was fitting the
 // padding and rendering the wordmark tiny. These are cropped to the ink.
-const LOGO_WHITE = "/victoria-logo-mark.png";
+const LOGO_WHITE = "/victoria-logo-white.svg";      // official vector logo, for the blue sidebar
+const LOGO_COLOR = "/victoria-logo-color.svg";      // same logo for light backgrounds
 
 const isActive = (path, pathname) =>
     path === '/' || path === '/salary' ? pathname === path : pathname.startsWith(path);
@@ -167,10 +168,10 @@ export default function Layout({ children }) {
                     ${open ? 'translate-x-0 shadow-pop' : '-translate-x-full'}`}
             >
                 {/* Brand block */}
-                <div className="shrink-0 bg-white px-4 pb-2 pt-3.5">
-                    <img src={LOGO_WHITE} alt="Victoria Garments" className="w-full"
+                <div className="shrink-0 bg-[#054594] px-5 pb-3 pt-4">
+                    <img src={LOGO_WHITE} alt="Victoria Garments" className="w-full" width="231" height="48"
                         data-testid="sidebar-logo" />
-                    <p className="pt-2 text-center text-[8.5px] font-semibold uppercase tracking-[0.22em] text-slate-400">
+                    <p className="pt-2 text-center text-[8.5px] font-semibold uppercase tracking-[0.22em] text-[#BBD0F0]">
                         Unit Flow
                     </p>
                 </div>
@@ -252,7 +253,7 @@ export default function Layout({ children }) {
                     >
                         {open ? <X size={19} /> : <Menu size={19} />}
                     </button>
-                    <img src={LOGO_WHITE} alt="Victoria" className="mr-3 h-4 lg:hidden" />
+                    <img src={LOGO_COLOR} alt="Victoria" className="mr-3 h-5 w-auto lg:hidden" />
                     <span className="font-outfit text-[13.5px] font-medium text-slate-700">{currentLabel}</span>
 
                     <div className="relative ml-auto flex items-center gap-2" ref={notifRef}>
