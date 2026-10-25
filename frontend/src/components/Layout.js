@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import {
     LayoutDashboard, Users, Scissors, Package, Palette, Ruler,
     ClipboardList, IndianRupee, FileBarChart, Receipt,
-    Settings, LogOut, Menu, X, UserCog, CalendarDays, Wallet, Bell, Check, History, ShieldCheck, Coins, Boxes, FileText, Wrench, Calculator, CalendarCheck, HardHat
+    Settings, LogOut, Menu, X, UserCog, CalendarDays, Wallet, Bell, Check, History, ShieldCheck, Coins, Boxes, FileText, Wrench, Calculator, CalendarCheck, HardHat, ChevronUp
 } from 'lucide-react';
 
 /** Grouped so a 14-item sidebar reads as four short lists instead of one wall. */
@@ -88,6 +88,16 @@ export default function Layout({ children }) {
     const navigate = useNavigate();
     const [open, setOpen] = useState(false);
     const [unread, setUnread] = useState(0);
+    const [userMenuOpen, setUserMenuOpen] = useState(false);
+    const userMenuRef = useRef(null);
+    useEffect(() => {
+        if (!userMenuOpen) return undefined;
+        const onDown = (e) => { if (userMenuRef.current && !userMenuRef.current.contains(e.target)) setUserMenuOpen(false); };
+        const onKey = (e) => { if (e.key === 'Escape') setUserMenuOpen(false); };
+        document.addEventListener('mousedown', onDown);
+        document.addEventListener('keydown', onKey);
+        return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
+    }, [userMenuOpen]);
     const [pendingApprovals, setPendingApprovals] = useState(0);
     const [notifOpen, setNotifOpen] = useState(false);
     const [notifications, setNotifications] = useState([]);
@@ -222,23 +232,31 @@ export default function Layout({ children }) {
                     ))}
                 </nav>
 
-                <div className="shrink-0 border-t border-white/15 px-3 py-2.5">
-                    <div className="flex items-center gap-2.5">
-                        <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-leaf text-[11px] font-bold text-white">
+                <div className="relative shrink-0 border-t border-white/15 px-2.5 py-2.5" ref={userMenuRef}>
+                    {userMenuOpen && (
+                        <div role="menu" aria-label="Account" data-testid="user-menu"
+                            className="absolute inset-x-2.5 bottom-[calc(100%-2px)] z-10 mb-1 overflow-hidden rounded-xl bg-white py-1 shadow-pop ring-1 ring-black/10">
+                            <div className="border-b border-border px-3 py-2">
+                                <p className="truncate text-[12.5px] font-semibold text-slate-800">{user?.name}</p>
+                                <p className="truncate text-[11px] text-slate-500">{user?.email}</p>
+                            </div>
+                            <button role="menuitem" onClick={handleLogout} data-testid="logout-button" autoFocus
+                                className="flex w-full cursor-pointer items-center gap-2 px-3 py-2.5 text-[13px] font-medium text-rose-700 hover:bg-rose-50 focus-visible:bg-rose-50 focus-visible:outline-none">
+                                <LogOut size={14} /> Sign out
+                            </button>
+                        </div>
+                    )}
+                    <button type="button" onClick={() => setUserMenuOpen(o => !o)} aria-haspopup="menu" aria-expanded={userMenuOpen}
+                        data-testid="user-menu-button"
+                        className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-1.5 py-1.5 text-left transition-colors hover:bg-white/10 focus-visible:bg-white/10 focus-visible:outline-none">
+                        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-leaf text-[11px] font-bold text-white">
                             {user?.name?.[0]?.toUpperCase()}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                            <div className="truncate text-[12.5px] font-medium text-white/90">{user?.name}</div>
-                            <div className="text-[10px] capitalize text-white/75">{user?.role?.replace('_', ' ')}</div>
-                        </div>
-                    </div>
-                    <button
-                        onClick={handleLogout}
-                        data-testid="logout-button"
-                        className="press mt-2 flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-md
-                            py-1.5 text-[11.5px] text-white/75 hover:bg-white/10 hover:text-white"
-                    >
-                        <LogOut size={12} /> Sign out
+                        </span>
+                        <span className="min-w-0 flex-1">
+                            <span className="block truncate text-[12.5px] font-medium text-white">{user?.name}</span>
+                            <span className="block text-[10px] capitalize text-white/75">{user?.role?.replace('_', ' ')}</span>
+                        </span>
+                        <ChevronUp size={15} className={`shrink-0 text-white/75 transition-transform duration-200 ${userMenuOpen ? '' : 'rotate-180'}`} aria-hidden="true" />
                     </button>
                 </div>
             </aside>
