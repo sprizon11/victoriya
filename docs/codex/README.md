@@ -16,6 +16,7 @@ one is merged and `test_api.py` is green.
 | 4 | `04-stock-po-expenses.md` | Stock (dual-unit), requirements -> auto PO, expense bills | Feeds costing |
 | 5 | `05-lot-lifecycle-reports-email.md` | Lot closing report, lot costing report, FY rollover, email reports | Needs stock + expenses for real cost figures |
 | 6 | `06-dashboard-dna-qa.md` | Dashboard redesign, "Lot DNA" traceability, full behaviour QA | Needs all data sources to exist |
+| 7 | `07-landing-page-v2.md` | Modern brand-blue landing page, official logo, custom-domain ready | Design-only; no backend rules change |
 
 ## How the owner's request list maps to files
 
