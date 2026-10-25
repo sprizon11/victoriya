@@ -48,8 +48,13 @@ Money/data conventions you must keep:
 # UI   -> http://localhost:3000   login: admin@example.com / admin123
 .\start-frontend.bat
 
-# regression suite — needs the API running on :8000. Baseline: 90 passed, 0 failed.
+# regression suites need the API running on :8000. Baselines after Phase 2 (all 0 failed):
+#   test_api 95, test_enquiries 48, test_audit 17, test_approvals 42, test_groups 26
 backend\.venv\Scripts\python.exe backend\test_api.py
+backend\.venv\Scripts\python.exe backend\test_enquiries.py
+backend\.venv\Scripts\python.exe backend\test_audit.py
+backend\.venv\Scripts\python.exe backend\test_approvals.py
+backend\.venv\Scripts\python.exe backend\test_groups.py
 
 # production build check (must say "Compiled successfully")
 cd frontend; npm run build

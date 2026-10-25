@@ -173,7 +173,25 @@ later screens depend on earlier ones:
 
 ---
 
+## Running the tests
+
+With the API running on :8000:
+
+```powershell
+backend\.venv\Scripts\python.exe backend\test_api.py
+backend\.venv\Scripts\python.exe backend\test_enquiries.py
+backend\.venv\Scripts\python.exe backend\test_audit.py
+backend\.venv\Scripts\python.exe backend\test_approvals.py
+backend\.venv\Scripts\python.exe backend\test_groups.py
+```
+
+Each cleans up the records it creates (audit and approval history are kept on purpose).
+
 ## Troubleshooting
+
+**Backend changes don't show up / `--reload` seems stuck**
+Uvicorn's auto-reload can hang on Windows while a browser tab still holds a connection open. Stop the
+backend (Ctrl+C, or end the process listening on port 8000) and start it again.
 
 **"MongoDB connection refused" / backend hangs on first request**
 Mongo isn't running. `Get-Service MongoDB`, or `docker ps` if using Docker.

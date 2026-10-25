@@ -299,3 +299,22 @@ Enquiry notifications use `audience: admin`. All notification reads and mutation
 respect that audience; older notifications without an audience retain their
 previous visibility. Enquiry list responses omit IP/user-agent metadata and are
 paginated in batches of 50. There are no production/payroll schema changes.
+
+
+---
+
+## 8. Added in Phase 2 (foundation)
+
+| Collection / module | Purpose |
+|---|---|
+| `backend/core.py` | Config, db handle, auth helpers, FY numbering (extracted from `server.py`, no behaviour change) |
+| `audit_logs` (`backend/audit.py`) | Append-only activity log. A middleware records every successful POST/PUT/DELETE and every 403; routes add before/after with `note()`. No edit/delete route; `reset_all_data` keeps it. Admin page `/audit`, CSV export. |
+| `approvals` (`backend/approvals.py`) | Maker-checker. Non-admins request production edit/delete; approving re-validates and applies server-side, atomically and idempotently, and expires if the entry changed. Admin actions on sensitive things (lot reopen, edit/rate change after production) are recorded as auto-approved. Rules are switchable in Settings; defaults are in `POLICY_DEFAULTS`. Page `/approvals`. |
+| `operator_groups`, `operation_groups` (`backend/groups.py`) | Optional labels on operators/operations. Entries snapshot `operator_group` / `operation_group`; dashboard and weekly report show group subtotals. |
+
+Lot edits are now guarded: a colour or operation that already has production cannot be removed,
+the plan cannot be set below what is produced, `color_id`s survive an edit, and a cleared quantity
+cell no longer returns a 500.
+
+Advance types are **deferred** (the owner will supply a reference image); advances and payroll
+deductions are unchanged.
