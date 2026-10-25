@@ -163,15 +163,15 @@ export default function Layout({ children }) {
     return (
         <div className="flex h-screen bg-background" data-testid="app-layout">
             <aside
-                className={`fixed inset-y-0 left-0 z-50 flex w-[236px] flex-col bg-brand-700
+                className={`fixed inset-y-0 left-0 z-50 flex w-[236px] flex-col bg-[#054594]
                     transition-transform duration-300 ease-out-soft lg:static lg:translate-x-0
                     ${open ? 'translate-x-0 shadow-pop' : '-translate-x-full'}`}
             >
                 {/* Brand block */}
-                <div className="shrink-0 bg-[#054594] px-5 pb-3 pt-4">
+                <div className="shrink-0 px-5 pb-3 pt-4">
                     <img src={LOGO_WHITE} alt="Victoria Garments" className="w-full" width="231" height="48"
                         data-testid="sidebar-logo" />
-                    <p className="pt-2 text-center text-[8.5px] font-semibold uppercase tracking-[0.22em] text-[#BBD0F0]">
+                    <p className="pt-2 text-center text-[8.5px] font-semibold uppercase tracking-[0.22em] text-white/75">
                         Unit Flow
                     </p>
                 </div>
@@ -180,7 +180,7 @@ export default function Layout({ children }) {
                 <nav className="scroll-dark flex-1 space-y-2.5 overflow-y-auto px-2.5 py-2.5">
                     {groups.map(group => (
                         <div key={group.label}>
-                            <p className="px-2.5 pb-1 text-[8.5px] font-semibold uppercase tracking-[0.16em] text-white/35">
+                            <p className="px-2.5 pb-1 text-[8.5px] font-semibold uppercase tracking-[0.16em] text-white/70">
                                 {group.label}
                             </p>
                             <div className="space-y-0.5">
@@ -197,8 +197,8 @@ export default function Layout({ children }) {
                                             className={`group relative flex items-center gap-2.5 rounded-lg px-2.5 py-[5.5px]
                                                 text-[12.5px] font-medium transition-all duration-150 ease-out-soft
                                                 ${active
-                                                    ? 'bg-white text-brand-700 shadow-float'
-                                                    : 'text-white/60 hover:bg-white/10 hover:text-white'}`}
+                                                    ? 'bg-white text-[#054594] shadow-float'
+                                                    : 'text-white/85 hover:bg-white/12 hover:text-white'}`}
                                         >
                                             {/* active rail */}
                                             <span className={`absolute -left-2.5 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full
@@ -222,21 +222,21 @@ export default function Layout({ children }) {
                     ))}
                 </nav>
 
-                <div className="shrink-0 border-t border-white/10 px-3 py-2.5">
+                <div className="shrink-0 border-t border-white/15 px-3 py-2.5">
                     <div className="flex items-center gap-2.5">
                         <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-leaf text-[11px] font-bold text-white">
                             {user?.name?.[0]?.toUpperCase()}
                         </div>
                         <div className="min-w-0 flex-1">
                             <div className="truncate text-[12.5px] font-medium text-white/90">{user?.name}</div>
-                            <div className="text-[10px] capitalize text-white/45">{user?.role?.replace('_', ' ')}</div>
+                            <div className="text-[10px] capitalize text-white/75">{user?.role?.replace('_', ' ')}</div>
                         </div>
                     </div>
                     <button
                         onClick={handleLogout}
                         data-testid="logout-button"
                         className="press mt-2 flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-md
-                            py-1.5 text-[11.5px] text-white/45 hover:bg-white/10 hover:text-white"
+                            py-1.5 text-[11.5px] text-white/75 hover:bg-white/10 hover:text-white"
                     >
                         <LogOut size={12} /> Sign out
                     </button>
