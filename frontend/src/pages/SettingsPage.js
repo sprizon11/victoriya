@@ -85,7 +85,7 @@ export default function SettingsPage() {
     };
 
     return (
-        <div className="space-y-4 max-w-2xl" data-testid="settings-page">
+        <div className="space-y-4" data-testid="settings-page">
             <PageHeader title="System settings" subtitle="Configuration and data management" icon={Settings} />
 
             <Card className="border-slate-200">
