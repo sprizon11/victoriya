@@ -48,3 +48,11 @@ The favicon set is derived deterministically from the existing `../victoria-leaf
 
 For needle/scissors/box/check/map UI symbols, use the project's existing Lucide icons at 1.5px stroke width; no additional generated icon assets are necessary.
 
+
+## Phase 7: brand-blue landing artwork (2026-10-25)
+
+The existing nine illustrative scenes were inspected against the official logo blue (`#054594`). Their navy, teal and neutral tones sit consistently inside the new solid-blue layout, so they were retained; no new synthetic factory or product claims were introduced. `scripts/landing_assets_v2.py` deterministically resizes those approved originals to 640, 960, 1280 and 1920-pixel WebP and JPEG variants using Pillow 13.0.0. The hero 1920 WebP is 174,780 bytes, below the 200 KB target. Every source in the `<picture>` sets includes the same subject and uses explicit dimensions and responsive `sizes`. The older original assets remain available, and the browser downloads only the selected responsive variant.
+
+The social card was regenerated as an 1200×630 blue canvas with the official `victoria-logo-white.svg` centered, using CairoSVG 2.8.2 in the local development environment. The favicon, Apple touch icon and PWA icons were regenerated from the supplied `victoria-leaf.png` on `#054594`. CairoSVG and Pillow are development-only asset tools; neither is a runtime dependency. The `victoria-logo-white.svg` and `victoria-logo-color.svg` originals were not modified.
+
+The Phase 1 image provenance and original prompt set above remain the source record. The new variants are derived exports, not independently generated images. Regeneration command: `backend\.venv\Scripts\python.exe scripts\landing_assets_v2.py` after installing development-only Pillow and CairoSVG. The social card contains only the owner's existing white vector logo and blue background.
