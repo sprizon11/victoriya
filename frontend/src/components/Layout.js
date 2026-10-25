@@ -47,6 +47,7 @@ const navGroups = [
         label: 'System',
         items: [
             { path: '/users', label: 'Users', icon: UserCog, roles: ['admin'] },
+            { path: '/enquiries', label: 'Enquiries', icon: Bell, roles: ['admin'] },
             { path: '/settings', label: 'Settings', icon: Settings, roles: ['admin'] },
         ],
     },

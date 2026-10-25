@@ -1,0 +1,45 @@
+export const content = {
+  pageTitle: 'Victoria Garments — Garment manufacturer in Tiruppur',
+  heroAlt: 'Illustrative navy, white and teal fabric stacks in soft window light',
+  whatsappLabel: 'WhatsApp', illustrative: 'Illustrative',
+  name: 'Victoria Garments', tagline: 'Irresistible Fashion', location: 'Tiruppur, Tamil Nadu, India',
+  phone: '+91 421 24 79 137', phoneHref: '+914212479137', email: 'info@victoriagarments.in',
+  // TODO(owner): confirm conflicting postal addresses before publication.
+  address: '', hours: '', whatsapp: '', canonicalUrl: '',
+  // TODO(owner): supply confirmed hours, WhatsApp number and final public URL.
+  // TODO(owner): supply founding year, capacity, machines, workforce, markets and clients.
+  stats: [], certifications: [], gallery: [], clients: [], markets: [], testimonials: [],
+  // TODO(owner): supply certifications, real premises photographs and testimonials, if applicable.
+  nav: [['about', 'About'], ['collection', 'What we make'], ['process', 'Our process']],
+  quote: 'Request a quote', staff: 'Staff login', call: 'Call us', skip: 'Skip to content',
+  eyebrow: 'VICTORIA GARMENTS · TIRUPPUR',
+  headline: 'Thoughtfully made.\nReady to wear.',
+  intro: 'Men’s and women’s wear, made in Tiruppur. Let’s talk about your next garment order.',
+  aboutLabel: 'ROOTED IN TIRUPPUR', aboutTitle: 'Good garments begin with a conversation.',
+  about: ['Victoria Garments is a manufacturer and supplier of men’s wear and women’s wear in Tiruppur, Tamil Nadu.', 'Share your requirements with us. From the first sample to the packed garment, our conversation starts with what you need.'],
+  collectionLabel: 'WHAT WE MAKE', collectionTitle: 'Everyday wear. Considered details.',
+  products: [
+    { title: 'Men’s wear', description: 'Tell us the style, quantities and finish you have in mind.', image: 'mens-wear.webp', alt: 'Illustrative flat lay of plain navy and grey garments' },
+    { title: 'Women’s wear', description: 'Bring your requirements. Let’s discuss the details together.', image: 'womens-wear.webp', alt: 'Illustrative flat lay of teal and white garments' },
+  ],
+  processLabel: 'FROM IDEA TO FINISHED GARMENT', processTitle: 'The making of a garment.',
+  processIntro: 'A look at the garment-making journey, one step at a time.',
+  steps: [
+    ['Sampling', 'Begin with the details.', 'sampling', 'Pattern paper, chalk and measuring tape'],
+    ['Cutting', 'Give the fabric its shape.', 'cutting', 'Layered fabric and cutting shears'],
+    ['Stitching', 'Bring the pieces together.', 'stitching', 'Sewing machine needle stitching a hem'],
+    ['Finishing & checking', 'Focus on the final details.', 'finishing', 'Folded garments and checking tools'],
+    ['Packing', 'Prepare the finished garments.', 'packing', 'Garments in a plain cardboard carton'],
+  ],
+  qualityTitle: 'Quality & compliance', galleryTitle: 'A closer look',
+  imageNote: 'Illustrative imagery. These are not photographs of Victoria Garments’ premises or product catalogue.',
+  contactLabel: 'LET’S MAKE A START', contactTitle: 'Your next order\nstarts here.',
+  contactIntro: 'Tell us what you’re looking for. Share your garment requirements and contact details so we can get in touch.',
+  directions: 'Find Tiruppur on the map',
+  fields: { name: 'Name', company: 'Company', email: 'Email', phone: 'Phone', message: 'Your requirements', website: 'Website' },
+  required: 'Required fields are marked *.', messageHelp: 'Up to 1,500 characters. Please use plain text.',
+  submit: 'Send enquiry', sending: 'Sending…', success: 'Thank you. Your enquiry has been received.',
+  error: 'We couldn’t send your enquiry. Please try again or contact us by phone or email.',
+  rateError: 'Too many enquiries. Please try again in an hour, or call us.',
+  privacy: 'Your details will be used to respond to this enquiry.', copyright: 'Victoria Garments. All rights reserved.',
+};

@@ -235,3 +235,32 @@ Everything below was required to make the project runnable outside Emergent.
 **Not changed** — flagged in `ANALYSIS.md` instead: the committed `JWT_SECRET`,
 the default admin password, and the permissive CORS regex. Fix these before this
 goes anywhere near a real network.
+
+## Phase 1 — public website (2026-10-25)
+
+Logged-out `/` and `/home` show the public website. Staff login remains `/login`;
+logged-in `/` remains the dashboard. Admins can review website submissions at
+`/enquiries` and mark them new or handled. No SMTP configuration is needed.
+
+All marketing copy and optional facts live in `frontend/src/landing/content.js`.
+Postal address, hours, WhatsApp, certifications, statistics, gallery and public
+origin remain `TODO(owner)` and are omitted until confirmed. Images are explicitly
+illustrative, not factory or catalogue photographs. See `frontend/public/landing/ASSETS.md`.
+
+Before deploying, confirm the public URL: update the canonical link and absolute
+Open Graph/Twitter image URLs in `frontend/public/index.html`, populate
+`frontend/public/sitemap.xml` with the absolute `/home` URL, and add its Sitemap
+line to `robots.txt`. The owner explicitly deferred this URL during local work.
+No new runtime environment variables or runtime dependencies were added.
+
+Enquiries accept plain text only, with a five-submission, one-hour per-IP quota
+starting with the first submission. The MongoDB TTL index cleans expired quotas;
+the atomic update resets expired quotas even before TTL cleanup. Client IP comes
+from ASGI request.client (Uvicorn's trusted-proxy handling); the application does
+not independently trust arbitrary `X-Real-IP` headers. Keep the backend behind
+Render's trusted ingress in production. Email forwarding is deferred to Phase 5.
+
+Install test-only dependencies with `backend\.venv\Scripts\python.exe -m pip install -r backend/requirements-dev.txt`.
+Run `backend\.venv\Scripts\python.exe backend/test_enquiries.py` alongside the main
+regression suite. These tests create and remove only their own enquiry/user
+fixtures, and preserve the prior local quota and notification read states.

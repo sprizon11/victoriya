@@ -1,24 +1,29 @@
+import React, { Suspense, useEffect } from 'react';
 import "@/App.css";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { Toaster } from "sonner";
 import Layout from "./components/Layout";
-import LoginPage from "./pages/LoginPage";
-import DashboardPage from "./pages/DashboardPage";
-import OperatorsPage from "./pages/OperatorsPage";
-import OperationsPage from "./pages/OperationsPage";
-import ColorsPage from "./pages/ColorsPage";
-import SizeChartsPage from "./pages/SizeChartsPage";
-import AdvancesPage from "./pages/AdvancesPage";
-import LotsPage from "./pages/LotsPage";
-import LotFormPage from "./pages/LotFormPage";
-import ProductionEntryPage from "./pages/ProductionEntryPage";
-import PayrollPage from "./pages/PayrollPage";
-import ReportsPage from "./pages/ReportsPage";
-import VouchersPage from "./pages/VouchersPage";
-import SettingsPage from "./pages/SettingsPage";
-import WeeksPage from "./pages/WeeksPage";
-import UsersPage from "./pages/UsersPage";
+const LoginPage = React.lazy(() => import("./pages/LoginPage"));
+const DashboardPage = React.lazy(() => import("./pages/DashboardPage"));
+const OperatorsPage = React.lazy(() => import("./pages/OperatorsPage"));
+const OperationsPage = React.lazy(() => import("./pages/OperationsPage"));
+const ColorsPage = React.lazy(() => import("./pages/ColorsPage"));
+const SizeChartsPage = React.lazy(() => import("./pages/SizeChartsPage"));
+const AdvancesPage = React.lazy(() => import("./pages/AdvancesPage"));
+const LotsPage = React.lazy(() => import("./pages/LotsPage"));
+const LotFormPage = React.lazy(() => import("./pages/LotFormPage"));
+const ProductionEntryPage = React.lazy(() => import("./pages/ProductionEntryPage"));
+const PayrollPage = React.lazy(() => import("./pages/PayrollPage"));
+const ReportsPage = React.lazy(() => import("./pages/ReportsPage"));
+const VouchersPage = React.lazy(() => import("./pages/VouchersPage"));
+const SettingsPage = React.lazy(() => import("./pages/SettingsPage"));
+const WeeksPage = React.lazy(() => import("./pages/WeeksPage"));
+const UsersPage = React.lazy(() => import("./pages/UsersPage"));
+
+const Landing = React.lazy(() => import('./landing/LandingPage'));
+const EnquiriesPage = React.lazy(() => import('./pages/EnquiriesPage'));
+const PublicLanding = () => <Suspense fallback={<div className="p-8">Victoria Garments</div>}><Landing /></Suspense>;
 
 function ProtectedRoute({ children, roles }) {
     const { user, loading } = useAuth();
@@ -30,12 +35,18 @@ function ProtectedRoute({ children, roles }) {
 
 function AppRoutes() {
     const { user, loading } = useAuth();
-    if (loading) return <div className="flex items-center justify-center h-screen text-slate-500">Loading...</div>;
+    const { pathname } = useLocation();
+    useEffect(() => {
+        if (pathname !== "/home" && (pathname !== "/" || user)) document.title = "Victoria Unit Flow";
+    }, [pathname, user]);
+    if (loading && !['/', '/home'].includes(window.location.pathname)) return <div className="flex items-center justify-center h-screen text-slate-500">Loading...</div>;
 
     return (
         <Routes>
             <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
-            <Route path="/" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
+            <Route path="/home" element={<PublicLanding />} />
+            <Route path="/" element={user ? <ProtectedRoute><Suspense fallback={<div>Loading...</div>}><DashboardPage /></Suspense></ProtectedRoute> : <PublicLanding />} />
+            <Route path="/enquiries" element={<ProtectedRoute roles={['admin']}><Suspense fallback={<div>Loading...</div>}><EnquiriesPage /></Suspense></ProtectedRoute>} />
             <Route path="/operators" element={<ProtectedRoute roles={['admin']}><OperatorsPage /></ProtectedRoute>} />
             <Route path="/operations" element={<ProtectedRoute roles={['admin']}><OperationsPage /></ProtectedRoute>} />
             <Route path="/colors" element={<ProtectedRoute roles={['admin']}><ColorsPage /></ProtectedRoute>} />
@@ -60,7 +71,7 @@ function App() {
     return (
         <BrowserRouter>
             <AuthProvider>
-                <AppRoutes />
+                <Suspense fallback={<div className="p-8">Loading...</div>}><AppRoutes /></Suspense>
                 <Toaster position="top-right" richColors closeButton />
             </AuthProvider>
         </BrowserRouter>

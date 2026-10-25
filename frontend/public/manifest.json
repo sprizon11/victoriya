@@ -1,6 +1,6 @@
 {
   "short_name": "Victoria",
-  "name": "Victoria Unit Flow",
+  "name": "Victoria Garments",
   "icons": [
     {
       "src": "favicon.ico",
@@ -18,7 +18,7 @@
       "sizes": "512x512"
     }
   ],
-  "start_url": ".",
+  "start_url": "/",
   "display": "standalone",
   "theme_color": "#294f96",
   "background_color": "#ffffff"

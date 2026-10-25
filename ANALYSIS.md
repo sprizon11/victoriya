@@ -287,3 +287,15 @@ Roughly in order of value:
 4. **Add tests** for the two rules that protect the payroll: the over-production
    check and FIFO advance adjustment.
 5. **Split `server.py` into routers**, then paginate the report endpoints.
+
+## Phase 1 model additions (2026-10-25)
+
+| Collection | Holds | Access / retention |
+|---|---|---|
+| `enquiries` | Bounded plain-text website contact fields, UTC created/updated timestamps, status, updater, IP and bounded user agent | Public create; admin list/status update; no delete route; reset includes collection |
+| `rate_limits` | Atomic per-IP enquiry counter and BSON expiry | Internal only; TTL cleanup after one hour |
+
+Enquiry notifications use `audience: admin`. All notification reads and mutations
+respect that audience; older notifications without an audience retain their
+previous visibility. Enquiry list responses omit IP/user-agent metadata and are
+paginated in batches of 50. There are no production/payroll schema changes.
