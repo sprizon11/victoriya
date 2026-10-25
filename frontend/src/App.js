@@ -54,6 +54,13 @@ function AppRoutes() {
     const { pathname } = location;
     useEffect(() => {
         if (pathname !== "/home" && (pathname !== "/" || user)) document.title = "Victoria Unit Flow";
+        // Public pages may be indexed; staff paths must never appear in search results.
+        const staffPath = pathname !== '/home' && (pathname !== '/' || Boolean(user));
+        let robots = document.querySelector('meta[name="robots"]');
+        if (staffPath) {
+            if (!robots) { robots = document.createElement('meta'); robots.name = 'robots'; document.head.appendChild(robots); }
+            robots.content = 'noindex, nofollow';
+        } else if (robots) robots.remove();
     }, [pathname, user]);
     if (loading && !['/', '/home'].includes(window.location.pathname)) return <div className="flex items-center justify-center h-screen text-slate-500">Loading...</div>;
 
