@@ -13,7 +13,7 @@ import { Label } from '../components/ui/label';
 const DAYS = ['Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
 const BLANK = () => Array(7).fill('');
 const num = (v) => (v === '' || v == null ? 0 : parseFloat(v) || 0);
-const shiftText = (v) => String(v).replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1').slice(0, 4);
+const shiftText = (v) => String(v).replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1').slice(0, 5);
 const strs = (arr) => arr.map(x => (x ? String(x) : ''));
 const sum = (arr) => arr.reduce((t, v) => t + num(v), 0);
 const r2 = (x) => Math.round((x + Number.EPSILON) * 100) / 100;       // display only; the server decides the saved figure
@@ -75,15 +75,20 @@ export default function SalaryCalculatorPage() {
     const useSaved = entry && !reprice;
     const dayRate = useSaved ? entry.day_rate : worker?.day_rate || 0;
     const nightRate = useSaved ? entry.night_rate : worker?.night_rate || 0;
-    const rateChanged = entry && worker && (entry.day_rate !== worker.day_rate || entry.night_rate !== worker.night_rate);
+    const timed = (useSaved ? entry.pay_type : worker?.pay_type) === 'time';           // by hours rather than by shift
+    const hpd = timed ? (useSaved ? entry.hours_per_day : worker?.hours_per_day) || 8 : 1;
+    const unit = timed ? 'hours' : 'shifts';
+    const step = timed ? 4 : 2;                                                         // quarters of an hour, or halves of a shift
+    const typeChanged = entry && worker && (entry.pay_type || 'shift') !== (worker.pay_type || 'shift');
+    const rateChanged = entry && worker && (typeChanged || entry.day_rate !== worker.day_rate || entry.night_rate !== worker.night_rate || (timed && entry.hours_per_day !== worker.hours_per_day));
 
     const dayTotal = sum(day), nightTotal = sum(night);
-    const dayWage = r2(dayTotal * dayRate), nightWage = r2(nightTotal * nightRate);
+    const dayWage = r2(dayTotal * dayRate / hpd), nightWage = r2(nightTotal * nightRate / hpd);     // divided once, rounded once
     const gross = r2(dayWage + nightWage);
     const adv = num(advance);
     const net = r2(gross - adv);
     const tooMuch = adv > gross + 0.001;
-    const badCell = [...day, ...night].some(v => v !== '' && (num(v) * 2) % 1 !== 0);
+    const badCell = [...day, ...night].some(v => v !== '' && (num(v) * step) % 1 !== 0);
 
     const dates = useMemo(() => DAYS.map((d, i) => { const iso = addDays(week, i); return { d, n: iso.slice(8) }; }), [week]);
 
@@ -103,7 +108,7 @@ export default function SalaryCalculatorPage() {
     const body = () => ({ day_shifts: day.map(num), night_shifts: night.map(num), advance: adv, notes, reprice });
     const save = async () => {
         if (!worker) return toast.error('Choose a worker');
-        if (badCell) return toast.error('Shifts go up in halves: 0, 0.5, 1, 1.5 …');
+        if (badCell) return toast.error(timed ? 'Hours go up in quarters: 0, 0.25, 0.5 …' : 'Shifts go up in halves: 0, 0.5, 1, 1.5 …');
         if (tooMuch) return toast.error('The advance is more than the wage');
         setBusy(true);
         try {
@@ -159,11 +164,13 @@ export default function SalaryCalculatorPage() {
                             </div>
                             {worker && (
                                 <p className="mt-2.5 inline-flex flex-wrap items-center gap-2 rounded-full bg-slate-50 px-3 py-1 text-[12px] text-slate-600 ring-1 ring-inset ring-slate-200" data-testid="calc-chip">
-                                    {worker.designation || 'Worker'}{worker.department && ` · ${worker.department}`} · Day {inr(worker.day_rate, { decimals: 0 })}/shift · Night {inr(worker.night_rate, { decimals: 0 })}/shift
+                                    {worker.designation || 'Worker'}{worker.department && ` · ${worker.department}`} · {worker.pay_type === 'time'
+                                        ? `By hours · ${worker.hours_per_day} h a day · Day ${inr(worker.day_rate, { decimals: 0 })} · Night ${inr(worker.night_rate, { decimals: 0 })} a day`
+                                        : `Day ${inr(worker.day_rate, { decimals: 0 })}/shift · Night ${inr(worker.night_rate, { decimals: 0 })}/shift`}
                                 </p>)}
                         </Panel>
 
-                        <Panel title="Shifts this week (Sat to Fri)" bodyClass="p-3.5">
+                        <Panel title={timed ? 'Hours worked this week (Sat to Fri)' : 'Shifts this week (Sat to Fri)'} bodyClass="p-3.5">
                             <div className="overflow-x-auto">
                                 <table className="w-full table-fixed text-center sm:min-w-[520px]" data-testid="shift-grid">
                                     <thead><tr>
@@ -171,7 +178,7 @@ export default function SalaryCalculatorPage() {
                                         {dates.map(x => <th key={x.d} className="pb-1 text-[11px] font-semibold text-slate-500">{x.d}<span className="block text-[10px] font-normal text-slate-400">{x.n}</span></th>)}
                                         <th className="w-9 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground sm:w-auto">Total</th></tr></thead>
                                     <tbody>
-                                        {[['Day shift', Sun, day, setDay, 0], ['Night shift', Moon, night, setNight, 1]].map(([label, Icon, arr, setArr, row]) => (
+                                        {[[timed ? 'Day hours' : 'Day shift', Sun, day, setDay, 0], [timed ? 'Night hours' : 'Night shift', Moon, night, setNight, 1]].map(([label, Icon, arr, setArr, row]) => (
                                             <tr key={label}>
                                                 <td className="py-1 pr-1 text-left text-[12.5px] font-medium text-slate-700 sm:pr-2" title={label}><span className="inline-flex items-center gap-1.5"><Icon size={14} className={row ? 'text-indigo-500' : 'text-amber-500'} /><span className="hidden sm:inline">{label}</span></span></td>
                                                 {arr.map((v, i) => (
@@ -181,7 +188,7 @@ export default function SalaryCalculatorPage() {
                                                             onChange={e => setCell(arr, setArr, i, e.target.value)} onKeyDown={e => onKey(e, row, i)}
                                                             aria-label={`${label}, ${DAYS[i]}`} data-testid={`${row ? 'night' : 'day'}-${i}`}
                                                             className={`h-11 w-full min-w-0 rounded-lg px-0 border bg-white text-center text-[15px] font-medium tabular-nums outline-none transition-colors focus:border-brand focus:ring-2 focus:ring-brand/20 disabled:bg-slate-50 disabled:text-slate-300
-                                                                ${v !== '' && (num(v) * 2) % 1 !== 0 ? 'border-rose-400 bg-rose-50' : 'border-input'}`} />
+                                                                ${v !== '' && (num(v) * step) % 1 !== 0 ? 'border-rose-400 bg-rose-50' : 'border-input'}`} />
                                                     </td>))}
                                                 <td className="tnum px-1 text-[13px] sm:px-2 sm:text-[14px] font-semibold text-slate-800" data-testid={`${row ? 'night' : 'day'}-total`}>{sum(arr)}</td>
                                             </tr>))}
@@ -189,13 +196,14 @@ export default function SalaryCalculatorPage() {
                                 </table>
                             </div>
                             <div className="mt-2 flex flex-wrap items-center gap-2 text-[11.5px] text-slate-500">
-                                <span>1 = a full shift · 1.5 = shift plus overtime · 0.5 = half · 0 = absent</span>
+                                <span>{timed ? `Hours worked each day, in quarters (7.5, 8, 9.25 …). A full day is ${hpd} h; hours beyond that are paid at the same rate.` : '1 = a full shift · 1.5 = shift plus overtime · 0.5 = half · 0 = absent'}</span>
                                 <span className="ml-auto flex gap-1.5">
-                                    <Button variant="ghost" size="sm" className="h-7 text-[11px]" disabled={!workerId} onClick={() => fill(setDay, '1')} data-testid="fill-day">Day: all 1</Button>
-                                    <Button variant="ghost" size="sm" className="h-7 text-[11px]" disabled={!workerId} onClick={() => fill(setNight, '1')} data-testid="fill-night">Night: all 1</Button>
+                                    <Button variant="ghost" size="sm" className="h-7 text-[11px]" disabled={!workerId} onClick={() => fill(setDay, String(timed ? hpd : 1))} data-testid="fill-day">Day: all {timed ? hpd : 1}</Button>
+                                    <Button variant="ghost" size="sm" className="h-7 text-[11px]" disabled={!workerId} onClick={() => fill(setNight, String(timed ? hpd : 1))} data-testid="fill-night">Night: all {timed ? hpd : 1}</Button>
                                     <Button variant="ghost" size="sm" className="h-7 text-[11px]" disabled={!workerId} onClick={() => { setDay(BLANK()); setNight(BLANK()); }}>Clear</Button>
                                 </span>
                             </div>
+                            {badCell && <p className="mt-2 text-[12px] text-rose-600" role="alert" data-testid="bad-cell">{timed ? 'Hours go up in quarters: 8, 8.25, 8.5 …' : 'Shifts go up in halves: 0.5, 1, 1.5 …'} Fix the red box to save.</p>}
                         </Panel>
 
                         <Panel title="Advance this week" bodyClass="p-3.5">
@@ -210,24 +218,24 @@ export default function SalaryCalculatorPage() {
                         </Panel>
                     </div>
 
-                    <div className="min-w-0 lg:col-span-2">
+                    <div className="min-w-0 lg:sticky lg:top-4 lg:col-span-2 lg:self-start">
                         <Panel title="Payslip" bodyClass="p-4" data-testid="payslip">
                             {!worker ? <p className="py-8 text-center text-[13px] text-slate-400">Choose a worker to see the payslip.</p> : (
                                 <div className="space-y-3">
                                     <div className="flex items-center gap-3">
                                         <span className="grid h-11 w-11 place-items-center rounded-full bg-brand/10 text-[14px] font-bold text-brand">{worker.name.split(' ').map(p => p[0]).slice(0, 2).join('').toUpperCase()}</span>
                                         <div className="min-w-0"><p className="truncate text-[15px] font-semibold text-slate-900" data-testid="slip-name">{worker.name}</p>
-                                            <p className="text-[12px] text-slate-500">{worker.designation || 'Worker'} · {dayTotal + nightTotal === 0 ? '0 shifts' : `${dayTotal + nightTotal} shifts`}</p></div>
+                                            <p className="text-[12px] text-slate-500">{worker.designation || 'Worker'} · {timed ? `${dayTotal + nightTotal} h` : `${dayTotal + nightTotal} shifts`}</p></div>
                                         {entry && !dirty && <Pill tone="green" className="ml-auto">saved</Pill>}
                                         {dirty && <Pill tone="amber" className="ml-auto">unsaved</Pill>}
                                     </div>
                                     {rateChanged && (
                                         <label className="flex cursor-pointer items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-[11.5px] text-amber-800 ring-1 ring-inset ring-amber-200">
                                             <input type="checkbox" className="mt-0.5" checked={reprice} onChange={e => setReprice(e.target.checked)} data-testid="reprice" />
-                                            <span>This week was paid at day ₹{entry.day_rate} / night ₹{entry.night_rate}. Today's rates are day ₹{worker.day_rate} / night ₹{worker.night_rate}. Tick to use today's rates.</span></label>)}
+                                            <span>{typeChanged ? `This week was entered ${timed ? 'by hours' : 'by shift'}, but ${worker.name} is now paid ${worker.pay_type === 'time' ? 'by hours' : 'by shift'}. Re-enter the numbers in the new unit, then tick to switch. ` : ''}This week was paid at day ₹{entry.day_rate} / night ₹{entry.night_rate}{entry.pay_type === 'time' ? ` a day of ${entry.hours_per_day} h` : ''}. Today's are day ₹{worker.day_rate} / night ₹{worker.night_rate}{worker.pay_type === 'time' ? ` a day of ${worker.hours_per_day} h` : ''}. Tick to use today's.</span></label>)}
                                     <dl className="divide-y divide-dashed divide-border text-[13px]">
-                                        <div className="flex justify-between py-2"><dt className="text-slate-600">Day shifts ({dayTotal} × ₹{dayRate})</dt><dd className="tnum font-medium" data-testid="slip-day">{inr(dayWage, { decimals: 0 })}</dd></div>
-                                        <div className="flex justify-between py-2"><dt className="text-slate-600">Night shifts ({nightTotal} × ₹{nightRate})</dt><dd className="tnum font-medium" data-testid="slip-night">{inr(nightWage, { decimals: 0 })}</dd></div>
+                                        <div className="flex justify-between py-2"><dt className="text-slate-600">{timed ? `Day hours (${dayTotal} h × ₹${dayRate} ÷ ${hpd})` : `Day shifts (${dayTotal} × ₹${dayRate})`}</dt><dd className="tnum font-medium" data-testid="slip-day">{inr(dayWage, { decimals: 0 })}</dd></div>
+                                        <div className="flex justify-between py-2"><dt className="text-slate-600">{timed ? `Night hours (${nightTotal} h × ₹${nightRate} ÷ ${hpd})` : `Night shifts (${nightTotal} × ₹${nightRate})`}</dt><dd className="tnum font-medium" data-testid="slip-night">{inr(nightWage, { decimals: 0 })}</dd></div>
                                         <div className="flex justify-between py-2"><dt className="font-medium text-slate-700">Gross</dt><dd className="tnum font-semibold" data-testid="slip-gross">{inr(gross, { decimals: 0 })}</dd></div>
                                         <div className="flex justify-between py-2"><dt className="text-slate-600">Advance</dt><dd className="tnum font-medium text-rose-600" data-testid="slip-advance">− {inr(adv, { decimals: 0 })}</dd></div>
                                     </dl>

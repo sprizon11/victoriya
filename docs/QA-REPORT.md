@@ -19,9 +19,9 @@ Run with the API on `:8000`: `backend\.venv\Scripts\python.exe backend\<file>.py
 | `test_phase4.py` | 109 | Stock ledger (two units), POs, receiving, expenses, bill files |
 | `test_phase5.py` | 67 | Costing, closing report, year-end rollover, email through a local SMTP sink |
 | `test_phase6.py` | 43 | Dashboard per role, speed on 40,000 entries, Lot DNA |
-| `test_salary.py` | 62 | Weekly salary: day/night shifts, rates kept per saved week, advance cap, no ESI/PF/piece rate, Excel and payslip PDF |
+| `test_salary.py` | 82 | Weekly salary: day/night shifts, time-based pay by hours, rates kept per saved week, advance cap, no ESI/PF/piece rate, Excel and payslip PDF |
 | Frontend (`craco test`) | 22 | `plannedFromOrder` agrees with the server; local-date helper; Saturday-to-Friday pay weeks |
-| **Total** | **627** | |
+| **Total** | **647** | |
 
 `npm run build` compiles with no warnings.
 

@@ -347,6 +347,7 @@ A second pay system for people paid by the shift, modelled on the owner's refere
 | API | `backend/salary.py`, prefix `/api/salary` | Departments, workers, one entry per worker per pay week, history, Excel export, payslip PDFs. Admin and finance-visible accounts only. |
 | Pay week | Saturday to Friday | `weekStartOf` in `frontend/src/lib/utils.js` and `week_start_of` in the backend agree (both tested). |
 | Shifts | `day_shifts[7]`, `night_shifts[7]` | Multiples of 0.5 up to 3 a day. Day and night have their own rate; a worker with no night rate follows the day rate. |
+| Time-based pay | `pay_type: "time"`, `hours_per_day` on the worker and the saved entry | The worker's rates are the salary for a whole day of `hours_per_day` hours. Pay = hours worked / hours per day x day salary, divided and rounded once (7 h of a 500 / 9 h day = 388.89, not 7 x 55.56). Hours go in quarters up to 24 a day; hours past a full day are paid at the same rate (no overtime multiplier assumed). Totals count hours as days (`day_days`). |
 | Not included | | No piece rate, no ESI, no PF, as asked. Gross minus advance is net pay. |
 | Rates | Snapshot per saved week | Changing a worker's rate never rewrites a paid week unless "use today's rates" is ticked. |
 | Advance | In the calculator | Cannot exceed the week's gross. Separate from the lot-payroll Advances page. |

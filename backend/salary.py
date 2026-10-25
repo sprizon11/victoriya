@@ -11,7 +11,7 @@ import io
 import re
 from datetime import timedelta, date as date_cls
 from decimal import Decimal, ROUND_HALF_UP
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -23,6 +23,7 @@ from audit import note
 router = APIRouter(prefix="/api/salary")
 DAYS = ["Sat", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri"]
 HALF = Decimal("0.5")
+QUARTER = Decimal("0.25")
 
 
 def _now():
@@ -62,8 +63,9 @@ def money(x) -> float:
     return float(Decimal(str(x)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
-def clean_shifts(values, label):
-    """Seven numbers, Sat..Fri. 1 = a full shift, 0.5 = half, 1.5 = a shift plus overtime."""
+def clean_shifts(values, label, step=HALF, top=3):
+    """Seven numbers, Sat..Fri. Shift workers: 1 = a full shift, 0.5 = half, 1.5 = a shift plus overtime.
+    Time-based workers: the same seven boxes hold hours, in quarters, up to 24."""
     if not isinstance(values, list) or len(values) != 7:
         raise HTTPException(400, f"{label}: give a number for each of the 7 days")
     out = []
@@ -72,20 +74,27 @@ def clean_shifts(values, label):
             d = Decimal(str(v if v not in (None, "") else 0))
         except Exception:
             raise HTTPException(400, f"{label} on {day}: '{v}' is not a number")
-        if d < 0 or d > 3 or (d % HALF) != 0:
-            raise HTTPException(400, f"{label} on {day}: use 0, 0.5, 1, 1.5, 2 … up to 3 (got {v})")
+        if d < 0 or d > top or (d % step) != 0:
+            what = "0, 0.5, 1, 1.5, 2 … up to 3" if step == HALF else "hours in quarters (0, 0.25, 0.5 … up to 24)"
+            raise HTTPException(400, f"{label} on {day}: use {what} (got {v})")
         out.append(float(d))
     return out
 
 
-def compute(day_shifts, night_shifts, day_rate, night_rate, advance):
+def compute(day_shifts, night_shifts, day_rate, night_rate, advance, hours_per_day=None):
+    """Shift workers: units x rate. Time-based workers: hours / hours-per-day x the day's salary, so half a day's
+    hours pay half the day's salary. Divided and rounded once at the end, never via a rounded hourly rate."""
     dt = sum(Decimal(str(x)) for x in day_shifts)
     nt = sum(Decimal(str(x)) for x in night_shifts)
-    dw = (dt * Decimal(str(day_rate))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    nw = (nt * Decimal(str(night_rate))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    per = Decimal(str(hours_per_day)) if hours_per_day else Decimal(1)
+    dw = (dt * Decimal(str(day_rate)) / per).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    nw = (nt * Decimal(str(night_rate)) / per).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     gross = dw + nw
     adv = Decimal(str(advance or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    return {"day_total": float(dt), "night_total": float(nt), "day_wage": float(dw), "night_wage": float(nw),
+    return {"day_total": float(dt), "night_total": float(nt),
+            "day_days": float((dt / per).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),      # shifts, or hours expressed as days, so totals add up across both kinds
+            "night_days": float((nt / per).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
+            "day_wage": float(dw), "night_wage": float(nw),
             "gross": float(gross), "advance": float(adv), "net": float(gross - adv)}
 
 
@@ -101,6 +110,8 @@ class WorkerIn(BaseModel):
     department: str = Field(default="", max_length=60)
     day_rate: float = Field(ge=0, le=100000)
     night_rate: Optional[float] = Field(default=None, ge=0, le=100000)      # blank = follows the day rate, even when that changes
+    pay_type: Literal["shift", "time"] = "shift"          # time: the rates are the salary for a whole day of hours_per_day hours
+    hours_per_day: Optional[float] = Field(default=None, gt=0, le=24)
 
 
 class WorkerUpdate(BaseModel):
@@ -110,6 +121,8 @@ class WorkerUpdate(BaseModel):
     department: Optional[str] = Field(default=None, max_length=60)
     day_rate: Optional[float] = Field(default=None, ge=0, le=100000)
     night_rate: Optional[float] = Field(default=None, ge=0, le=100000)
+    pay_type: Optional[Literal["shift", "time"]] = None
+    hours_per_day: Optional[float] = Field(default=None, gt=0, le=24)
     night_same_as_day: Optional[bool] = None      # True: forget a separate night rate and follow the day rate again
     active: Optional[bool] = None
 
@@ -152,6 +165,8 @@ async def delete_department(dept_id: str, request: Request):
 
 def present_worker(w):
     d = serialize_doc(dict(w))
+    d["pay_type"] = d.get("pay_type") or "shift"
+    d["hours_per_day"] = d.get("hours_per_day") if d["pay_type"] == "time" else None
     d["night_same_as_day"] = d.get("night_rate") is None
     d["night_rate"] = d["day_rate"] if d["night_same_as_day"] else d["night_rate"]
     return d
@@ -181,16 +196,18 @@ async def _dept_exists(name):
 async def create_worker(data: WorkerIn, request: Request):
     await salary_user(request)
     await _dept_exists(data.department)
+    if data.pay_type == "time" and not data.hours_per_day:
+        raise HTTPException(400, "Time-based workers need their working hours per day")
     emp = data.emp_id.strip()
     if emp and await db.salary_workers.find_one({"emp_id": {"$regex": f"^{re.escape(emp)}$", "$options": "i"}}):
         raise HTTPException(400, f"Employee ID {emp} is already used")
     doc = {"name": data.name.strip(), "designation": data.designation.strip(), "emp_id": emp, "department": data.department,
            "day_rate": money(data.day_rate), "night_rate": money(data.night_rate) if data.night_rate is not None else None,
-           "active": True, "created_at": _now()}
+           "pay_type": data.pay_type, "hours_per_day": data.hours_per_day if data.pay_type == "time" else None, "active": True, "created_at": _now()}
     res = await db.salary_workers.insert_one(doc)
     doc["_id"] = res.inserted_id
     note(request, entity_type="salary_worker", entity_id=str(res.inserted_id), label=doc["name"], summary=f"Added salary worker {doc['name']}",
-         after={"day_rate": doc["day_rate"], "night_rate": doc["night_rate"], "department": doc["department"]})
+         after={"day_rate": doc["day_rate"], "night_rate": doc["night_rate"], "department": doc["department"], "pay_type": doc["pay_type"], "hours_per_day": doc["hours_per_day"]})
     return present_worker(doc)
 
 
@@ -205,6 +222,11 @@ async def update_worker(worker_id: str, data: WorkerUpdate, request: Request):
         update.pop("night_rate_given", None)
     if not update:
         raise HTTPException(400, "No fields to update")
+    if "pay_type" in update or "hours_per_day" in update:
+        ptype = update.get("pay_type") or w.get("pay_type") or "shift"
+        hpd = update.get("hours_per_day") if update.get("hours_per_day") is not None else w.get("hours_per_day")
+        if ptype == "time" and not hpd:
+            raise HTTPException(400, "Time-based workers need their working hours per day")
     if "name" in update:
         update["name"] = update["name"].strip()
     if "department" in update:
@@ -259,8 +281,8 @@ def present_entry(e):
 
 def totals(entries):
     return {"workers": len(entries), "gross": round(sum(e["gross"] for e in entries), 2), "advance": round(sum(e["advance"] for e in entries), 2),
-            "net": round(sum(e["net"] for e in entries), 2), "day_shifts": round(sum(e["day_total"] for e in entries), 2),
-            "night_shifts": round(sum(e["night_total"] for e in entries), 2)}
+            "net": round(sum(e["net"] for e in entries), 2), "day_shifts": round(sum(e.get("day_days", e["day_total"]) for e in entries), 2),
+            "night_shifts": round(sum(e.get("night_days", e["night_total"]) for e in entries), 2)}
 
 
 @router.get("/week")
@@ -287,22 +309,27 @@ async def save_entry(week_start: str, worker_id: str, data: EntryIn, request: Re
     existing = await db.salary_entries.find_one({"week_start": s, "worker_id": worker_id})
     if not existing and not w.get("active", True):
         raise HTTPException(400, f"{w['name']} is switched off. Switch them on in Workers before paying them.")
-    day = clean_shifts(data.day_shifts, "Day shift")
-    night = clean_shifts(data.night_shifts, "Night shift")
-    both = [i for i in range(7) if day[i] + night[i] > 3]
-    if both:
-        raise HTTPException(400, f"{DAYS[both[0]]}: day and night shifts together come to more than 3. Check the numbers.")
     if existing and not data.reprice:
         day_rate, night_rate = existing["day_rate"], existing["night_rate"]       # rates stay as paid
+        ptype, hpd = existing.get("pay_type", "shift"), existing.get("hours_per_day")
     else:
         day_rate = w["day_rate"]
         night_rate = w.get("night_rate") if w.get("night_rate") is not None else w["day_rate"]
-    calc = compute(day, night, day_rate, night_rate, data.advance)
+        ptype = w.get("pay_type") or "shift"
+        hpd = w.get("hours_per_day") if ptype == "time" else None
+    timed = ptype == "time"
+    unit, top = ("hours", 24) if timed else ("shifts", 3)
+    day = clean_shifts(data.day_shifts, "Day hours" if timed else "Day shift", QUARTER if timed else HALF, top)
+    night = clean_shifts(data.night_shifts, "Night hours" if timed else "Night shift", QUARTER if timed else HALF, top)
+    both = [i for i in range(7) if day[i] + night[i] > top]
+    if both:
+        raise HTTPException(400, f"{DAYS[both[0]]}: day and night {unit} together come to more than {top}. Check the numbers.")
+    calc = compute(day, night, day_rate, night_rate, data.advance, hpd if timed else None)
     if calc["net"] < 0:
         raise HTTPException(400, f"The advance ({calc['advance']:,.2f}) is more than the wage ({calc['gross']:,.2f}). Reduce it; the rest can be taken next week.")
     doc = {"week_start": s, "week_end": e, "worker_id": worker_id, "worker_name": w["name"], "designation": w.get("designation", ""),
            "emp_id": w.get("emp_id", ""), "department": w.get("department", ""), "day_rate": day_rate, "night_rate": night_rate,
-           "day_shifts": day, "night_shifts": night, "notes": data.notes.strip(), **calc, "saved_by": user["id"], "saved_by_name": user.get("name", ""),
+           "pay_type": ptype, "hours_per_day": hpd if timed else None, "day_shifts": day, "night_shifts": night, "notes": data.notes.strip(), **calc, "saved_by": user["id"], "saved_by_name": user.get("name", ""),
            "saved_at": _now()}
     before = None
     if existing:
@@ -379,7 +406,7 @@ def build_xlsx(entries, weeks_summary=None, title="Salary"):
     wb = Workbook()
     ws = wb.active
     ws.title = title[:31]
-    head = ["Week from", "Week to", "Emp ID", "Worker", "Designation", "Department"] + [f"Day {d}" for d in DAYS] + ["Day shifts"] + [f"Night {d}" for d in DAYS] \
+    head = ["Week from", "Week to", "Emp ID", "Worker", "Designation", "Department", "Pay type", "Hours per day"] + [f"Day {d}" for d in DAYS] + ["Day shifts"] + [f"Night {d}" for d in DAYS] \
         + ["Night shifts", "Day rate", "Night rate", "Day wage", "Night wage", "Gross", "Advance", "Net pay", "Notes"]
     ws.append(head)
     for i in range(1, len(head) + 1):
@@ -388,8 +415,9 @@ def build_xlsx(entries, weeks_summary=None, title="Salary"):
         c.fill = PatternFill(start_color="294F96", end_color="294F96", fill_type="solid")
         c.alignment = Alignment(horizontal="center", wrap_text=True)
     for e in entries:
-        ws.append([e["week_start"], e["week_end"], _safe(e.get("emp_id", "")), _safe(e["worker_name"]), _safe(e.get("designation", "")), _safe(e.get("department", ""))]
-                  + e["day_shifts"] + [e["day_total"]] + e["night_shifts"] + [e["night_total"]]
+        ws.append([e["week_start"], e["week_end"], _safe(e.get("emp_id", "")), _safe(e["worker_name"]), _safe(e.get("designation", "")), _safe(e.get("department", "")),
+                   "By hours" if e.get("pay_type") == "time" else "By shift", e.get("hours_per_day") or ""]
+                  + e["day_shifts"] + [e.get("day_days", e["day_total"])] + e["night_shifts"] + [e.get("night_days", e["night_total"])]
                   + [e["day_rate"], e["night_rate"], e["day_wage"], e["night_wage"], e["gross"], e["advance"], e["net"], _safe(e.get("notes", ""))])
     if entries:
         t = totals(entries)
@@ -400,7 +428,7 @@ def build_xlsx(entries, weeks_summary=None, title="Salary"):
         for label, value in sums.items():
             ws.cell(row=r, column=head.index(label) + 1, value=value).font = Font(bold=True)
     ws.freeze_panes = "E2"
-    for col, w in zip("ABCDEF", (12, 12, 9, 24, 16, 16)):
+    for col, w in zip("ABCDEFGH", (12, 12, 9, 24, 16, 16, 10, 10)):
         ws.column_dimensions[col].width = w
     if weeks_summary:
         s2 = wb.create_sheet("Weeks")
@@ -455,20 +483,24 @@ def payslip_flowables(e, st):
           Paragraph(f"PAYSLIP · {_fmt_day(e['week_start'])} to {_fmt_day(e['week_end'])}", st["Heading2"]),
           Paragraph(f"<b>{e['worker_name']}</b>" + (f" · {e['designation']}" if e.get("designation") else "") + (f" · ID {e['emp_id']}" if e.get("emp_id") else "")
                     + (f" · {e['department']}" if e.get("department") else ""), st["Normal"]), Spacer(1, 8)]
-    grid = [["", *DAYS, "Total"], ["Day shift", *[f"{x:g}" for x in e["day_shifts"]], f"{e['day_total']:g}"],
-            ["Night shift", *[f"{x:g}" for x in e["night_shifts"]], f"{e['night_total']:g}"]]
+    timed = e.get("pay_type") == "time"
+    word = "hours" if timed else "shifts"
+    grid = [["", *DAYS, "Total"], [f"Day {word}", *[f"{x:g}" for x in e["day_shifts"]], f"{e['day_total']:g}"],
+            [f"Night {word}", *[f"{x:g}" for x in e["night_shifts"]], f"{e['night_total']:g}"]]
     t = Table(grid, colWidths=[70] + [38] * 7 + [48])
     t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), rl.HexColor("#294f96")), ("TEXTCOLOR", (0, 0), (-1, 0), rl.white), ("GRID", (0, 0), (-1, -1), 0.4, rl.grey),
                            ("ALIGN", (1, 0), (-1, -1), "CENTER"), ("FONTSIZE", (0, 0), (-1, -1), 9)]))
-    pay = [["", "Shifts", "Rate", "Amount"],
-           ["Day shifts", f"{e['day_total']:g}", f"{e['day_rate']:,.2f}", f"{e['day_wage']:,.2f}"],
-           ["Night shifts", f"{e['night_total']:g}", f"{e['night_rate']:,.2f}", f"{e['night_wage']:,.2f}"],
+    pay = [["", "Hours" if timed else "Shifts", "Rate", "Amount"],
+           [f"Day {word}", f"{e['day_total']:g}", f"{e['day_rate']:,.2f}", f"{e['day_wage']:,.2f}"],
+           [f"Night {word}", f"{e['night_total']:g}", f"{e['night_rate']:,.2f}", f"{e['night_wage']:,.2f}"],
            ["GROSS WAGE", "", "", f"{e['gross']:,.2f}"], ["Less: advance", "", "", f"-{e['advance']:,.2f}"], ["NET PAY", "", "", f"{e['net']:,.2f}"]]
     t2 = Table(pay, colWidths=[200, 70, 80, 100])
     t2.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), rl.HexColor("#294f96")), ("TEXTCOLOR", (0, 0), (-1, 0), rl.white), ("GRID", (0, 0), (-1, -1), 0.4, rl.grey),
                             ("ALIGN", (1, 0), (-1, -1), "RIGHT"), ("FONTNAME", (0, 3), (-1, 3), "Helvetica-Bold"), ("FONTNAME", (0, 5), (-1, 5), "Helvetica-Bold"),
                             ("BACKGROUND", (0, 5), (-1, 5), rl.HexColor("#e8f0ea"))]))
     el += [t, Spacer(1, 12), t2]
+    if timed:
+        el += [Spacer(1, 4), Paragraph(f"Time-based: the rate is the salary for a day of {e['hours_per_day']:g} hours. Pay = hours worked / {e['hours_per_day']:g} x day salary.", st["Normal"])]
     if e.get("notes"):
         el += [Spacer(1, 6), Paragraph(f"Note: {e['notes'].replace('&', '&amp;').replace('<', '&lt;')}", st["Normal"])]
     el += [Spacer(1, 36), Paragraph("Signature: ___________________", st["Normal"])]

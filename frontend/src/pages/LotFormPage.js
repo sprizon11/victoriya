@@ -337,7 +337,7 @@ export default function LotFormPage() {
     };
 
     return (
-        <div className="space-y-4 max-w-5xl" data-testid="lot-form-page">
+        <div className="space-y-4" data-testid="lot-form-page">
             <div className="flex flex-wrap items-center gap-3">
                 <Button variant="ghost" size="sm" onClick={leave} aria-label="Back to lots" data-testid="back-to-lots"><ArrowLeft size={16} /></Button>
                 <h1 className="text-2xl font-semibold text-slate-900 font-outfit">{isEdit ? 'Edit Lot' : 'Create New Lot'}</h1>

@@ -77,8 +77,8 @@ export default function SalaryWeekPage() {
                                             <tr key={e.id || e.worker_id} className="border-b border-border/60 last:border-0 hover:bg-slate-50/60" data-testid="week-row">
                                                 <td className="px-4 py-2"><p className="font-medium text-slate-800">{e.worker_name}</p>
                                                     <p className="text-[11px] text-slate-400">{[e.designation, e.department].filter(Boolean).join(' · ') || '—'}</p></td>
-                                                <td className="tnum px-2 py-2 text-right">{e.day_total}<span className="block text-[10.5px] text-slate-400">× {e.day_rate}</span></td>
-                                                <td className="tnum px-2 py-2 text-right">{e.night_total}<span className="block text-[10.5px] text-slate-400">× {e.night_rate}</span></td>
+                                                <td className="tnum px-2 py-2 text-right">{e.day_total}{e.pay_type === 'time' && ' h'}<span className="block text-[10.5px] text-slate-400">{e.pay_type === 'time' ? `${e.day_rate} ÷ ${e.hours_per_day} h` : `× ${e.day_rate}`}</span></td>
+                                                <td className="tnum px-2 py-2 text-right">{e.night_total}{e.pay_type === 'time' && ' h'}<span className="block text-[10.5px] text-slate-400">{e.pay_type === 'time' ? `${e.night_rate} ÷ ${e.hours_per_day} h` : `× ${e.night_rate}`}</span></td>
                                                 <td className="tnum px-2 py-2 text-right">{money(e.gross)}</td>
                                                 <td className="tnum px-2 py-2 text-right text-rose-600">{e.advance ? `− ${money(e.advance)}` : '—'}</td>
                                                 <td className="tnum px-2 py-2 text-right font-semibold text-brand">{money(e.net)}</td>
@@ -90,7 +90,7 @@ export default function SalaryWeekPage() {
                                             </tr>))}
                                     </tbody>
                                     <tfoot><tr className="border-t-2 border-border bg-slate-50/70 font-semibold">
-                                        <td className="px-4 py-2">Total ({t.workers})</td><td className="tnum px-2 py-2 text-right">{t.day_shifts}</td><td className="tnum px-2 py-2 text-right">{t.night_shifts}</td>
+                                        <td className="px-4 py-2">Total ({t.workers}) <span className="text-[10px] font-normal text-slate-400">in shifts / days</span></td><td className="tnum px-2 py-2 text-right">{t.day_shifts}</td><td className="tnum px-2 py-2 text-right">{t.night_shifts}</td>
                                         <td className="tnum px-2 py-2 text-right">{money(t.gross)}</td><td className="tnum px-2 py-2 text-right text-rose-600">− {money(t.advance)}</td><td className="tnum px-2 py-2 text-right text-brand">{money(t.net)}</td><td /></tr></tfoot>
                                 </table>
                             </div>)}

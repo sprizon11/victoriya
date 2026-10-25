@@ -169,8 +169,43 @@ check("an administrator can clear a week", cl.status_code == 200 and cl.json()["
 check("...a copy is kept", mongo.salary_cleared.count_documents({"week_start": W1}) == 1)
 check("...and the week is empty", call(admin, "get", S("/week"), params={"start": W1}).json()["entries"] == [])
 
+print("\n--- time-based pay (salary per day, hours per day) ---")
+W3 = "2020-01-25"
+check("a time-based worker needs hours per day", call(admin, "post", S("/workers"), json={"name": f"NoHours {tag}", "day_rate": 800, "pay_type": "time"}).status_code == 400)
+check("an unknown pay type is refused", call(admin, "post", S("/workers"), json={"name": f"Odd {tag}", "day_rate": 800, "pay_type": "weekly"}).status_code == 422)
+check("zero hours per day is refused", call(admin, "post", S("/workers"), json={"name": f"Zero {tag}", "day_rate": 800, "pay_type": "time", "hours_per_day": 0}).status_code == 422)
+r = call(admin, "post", S("/workers"), json={"name": f"Timed {tag}", "department": dept["name"], "day_rate": 800, "night_rate": 960, "pay_type": "time", "hours_per_day": 8})
+timed = r.json()
+check("a time-based worker is created with hours per day", r.status_code == 200 and timed["pay_type"] == "time" and timed["hours_per_day"] == 8, r.text)
+check("older and shift workers read as pay_type shift", ravi["pay_type"] == "shift" and ravi["hours_per_day"] is None)
+r = call(admin, "put", S(f"/week/{W3}/worker/{timed['id']}"), json={"day_shifts": [8, 8, 8, 8, 8, 8, 4], "night_shifts": [0, 0, 0, 0, 0, 0, 2.5], "advance": 100})
+t = r.json()
+check("hours / 8 x day salary: 52 h x 800 / 8 = 5,200", r.status_code == 200 and t["day_wage"] == 5200.0, r.text)
+check("night hours use the night salary: 2.5 h x 960 / 8 = 300", t["night_wage"] == 300.0 and t["gross"] == 5500.0 and t["net"] == 5400.0, t)
+check("the entry records it as time-based with its hours per day", t["pay_type"] == "time" and t["hours_per_day"] == 8 and t["day_total"] == 52)
+check("totals count hours as days (52 h / 8 = 6.5)", t["day_days"] == 6.5 and call(admin, "get", S("/week"), params={"start": W3}).json()["totals"]["day_shifts"] == 6.5)
+odd = call(admin, "post", S("/workers"), json={"name": f"Nine {tag}", "day_rate": 500, "pay_type": "time", "hours_per_day": 9}).json()
+r = call(admin, "put", S(f"/week/{W3}/worker/{odd['id']}"), json={"day_shifts": [7, 0, 0, 0, 0, 0, 0], "night_shifts": [0] * 7})
+check("rounded once at the end: 7 h x 500 / 9 = 388.89 (not 7 x 55.56)", r.json()["day_wage"] == 388.89, r.text)
+for label, b in [("0.3 of an hour", {"day_shifts": [0.3, 0, 0, 0, 0, 0, 0], "night_shifts": [0] * 7}),
+                 ("25 hours in a day", {"day_shifts": [25, 0, 0, 0, 0, 0, 0], "night_shifts": [0] * 7}),
+                 ("day and night over 24 hours together", {"day_shifts": [14, 0, 0, 0, 0, 0, 0], "night_shifts": [11, 0, 0, 0, 0, 0, 0]})]:
+    check(f"{label} is refused", call(admin, "put", S(f"/week/{W3}/worker/{timed['id']}"), json=b).status_code == 400)
+check("quarter hours are allowed (8.25 h)", call(admin, "put", S(f"/week/{W3}/worker/{odd['id']}"), json={"day_shifts": [8.25, 0, 0, 0, 0, 0, 0], "night_shifts": [0] * 7}).status_code == 200)
+call(admin, "put", S(f"/workers/{timed['id']}"), json={"day_rate": 1000})
+r = call(admin, "put", S(f"/week/{W3}/worker/{timed['id']}"), json={"day_shifts": [8, 8, 8, 8, 8, 8, 4], "night_shifts": [0, 0, 0, 0, 0, 0, 2.5], "advance": 100})
+check("a saved week keeps the salary it was paid at", r.json()["day_wage"] == 5200.0 and r.json()["day_rate"] == 800)
+r = call(admin, "put", S(f"/week/{W3}/worker/{timed['id']}"), json={"day_shifts": [8, 8, 8, 8, 8, 8, 4], "night_shifts": [0, 0, 0, 0, 0, 0, 2.5], "advance": 100, "reprice": True})
+check("...unless today's salary is asked for (52 h x 1000 / 8 = 6,500)", r.json()["day_wage"] == 6500.0)
+check("switching a worker to shift pay is allowed", call(admin, "put", S(f"/workers/{odd['id']}"), json={"pay_type": "shift"}).json()["pay_type"] == "shift")
+check("...and back to time needs the hours already stored", call(admin, "put", S(f"/workers/{odd['id']}"), json={"pay_type": "time"}).json()["hours_per_day"] == 9)
+x = load_workbook(io.BytesIO(call(admin, "get", S("/export"), params={"week": W3}).content)).active
+head = [c.value for c in x[1]]
+check("the Excel sheet says whether pay is by hours or by shift", "Pay type" in head and "Hours per day" in head and x.cell(row=2, column=head.index("Pay type") + 1).value in ("By hours", "By shift"), head)
+check("the payslip PDF works for a time-based worker", call(admin, "get", S(f"/payslip/{W3}/{timed['id']}")).content[:4] == b"%PDF")
+
 print("\n--- cleanup ---")
-mongo.salary_entries.delete_many({"week_start": {"$in": [W1, W2, "2020-01-18"]}})
+mongo.salary_entries.delete_many({"week_start": {"$in": [W1, W2, W3, "2020-01-18"]}})
 mongo.salary_cleared.delete_many({"week_start": W1})
 mongo.salary_workers.delete_many({"name": {"$regex": f"{tag}$"}})
 mongo.salary_departments.delete_many({"name": {"$regex": f"{tag}$"}})

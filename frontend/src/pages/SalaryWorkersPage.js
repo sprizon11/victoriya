@@ -11,7 +11,8 @@ import { PageHeader, Panel, EmptyState, Pill, FieldLabel, inr } from '../compone
 
 const selectCls = 'mt-1 h-9 w-full rounded-md border border-input bg-white px-2 text-[13px]';
 const decimal = (v) => v.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
-const BLANK = { name: '', designation: '', emp_id: '', department: '', day_rate: '', night_rate: '', night_same: true };
+const BLANK = { name: '', designation: '', emp_id: '', department: '', day_rate: '', night_rate: '', night_same: true, pay_type: 'shift', hours: '8' };
+const perHour = (daily, hours) => (parseFloat(hours) > 0 ? (parseFloat(daily) || 0) / parseFloat(hours) : 0);
 
 export default function SalaryWorkersPage() {
     const { user } = useAuth();
@@ -39,13 +40,17 @@ export default function SalaryWorkersPage() {
     const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
     const openAdd = () => setForm({ ...BLANK, department: dept !== 'all' ? dept : '' });
     const openEdit = (w) => setForm({ id: w.id, name: w.name, designation: w.designation || '', emp_id: w.emp_id || '', department: w.department || '',
-        day_rate: String(w.day_rate), night_rate: w.night_same_as_day ? '' : String(w.night_rate), night_same: w.night_same_as_day });
+        day_rate: String(w.day_rate), night_rate: w.night_same_as_day ? '' : String(w.night_rate), night_same: w.night_same_as_day,
+        pay_type: w.pay_type || 'shift', hours: w.hours_per_day ? String(w.hours_per_day) : '8' });
 
     const save = async () => {
         if (!form.name.trim()) return toast.error('Enter the worker\'s name');
-        if (form.day_rate === '') return toast.error('Enter the day rate');
-        if (!form.night_same && form.night_rate === '') return toast.error('Enter the night rate, or tick "same as day"');
-        const body = { name: form.name.trim(), designation: form.designation.trim(), emp_id: form.emp_id.trim(), department: form.department, day_rate: parseFloat(form.day_rate) };
+        const timed = form.pay_type === 'time';
+        if (form.day_rate === '') return toast.error(timed ? 'Enter the salary per day' : 'Enter the day rate');
+        if (!form.night_same && form.night_rate === '') return toast.error('Enter the night amount, or tick "same as day"');
+        if (timed && !(parseFloat(form.hours) > 0 && parseFloat(form.hours) <= 24)) return toast.error('Enter the working hours per day (1 to 24)');
+        const body = { name: form.name.trim(), designation: form.designation.trim(), emp_id: form.emp_id.trim(), department: form.department, day_rate: parseFloat(form.day_rate), pay_type: form.pay_type };
+        if (timed) body.hours_per_day = parseFloat(form.hours);
         if (form.id) { body.night_same_as_day = form.night_same; if (!form.night_same) body.night_rate = parseFloat(form.night_rate); }
         else if (!form.night_same) body.night_rate = parseFloat(form.night_rate);
         setBusy(true);
@@ -111,8 +116,10 @@ export default function SalaryWorkersPage() {
                                                 <td className="px-4 py-2"><p className="font-medium text-slate-800">{w.name} {!w.active && <Pill>off</Pill>}</p>
                                                     <p className="text-[11px] text-slate-400">{[w.emp_id, w.designation].filter(Boolean).join(' · ') || '—'}</p></td>
                                                 <td className="px-2 py-2 text-slate-600">{w.department || '—'}</td>
-                                                <td className="tnum px-2 py-2 text-right">{inr(w.day_rate, { decimals: 0 })}</td>
-                                                <td className="tnum px-2 py-2 text-right">{inr(w.night_rate, { decimals: 0 })}{w.night_same_as_day && <span className="block text-[10.5px] text-slate-400">same as day</span>}</td>
+                                                <td className="tnum px-2 py-2 text-right">{inr(w.day_rate, { decimals: 0 })}
+                                                    <span className="block text-[10.5px] text-slate-400">{w.pay_type === 'time' ? `per day · ${w.hours_per_day} h` : 'per shift'}</span></td>
+                                                <td className="tnum px-2 py-2 text-right">{inr(w.night_rate, { decimals: 0 })}
+                                                    <span className="block text-[10.5px] text-slate-400">{w.night_same_as_day ? 'same as day' : w.pay_type === 'time' ? 'per day' : 'per shift'}</span></td>
                                                 <td className="whitespace-nowrap px-3 py-2 text-right">
                                                     <Button variant="ghost" size="sm" aria-label={`Edit ${w.name}`} onClick={() => openEdit(w)}><Pencil size={14} /></Button>
                                                     <Button variant="ghost" size="sm" className="text-[11.5px]" onClick={() => toggle(w)}>{w.active ? 'Switch off' : 'Switch on'}</Button>
@@ -136,9 +143,22 @@ export default function SalaryWorkersPage() {
                                 <select className={selectCls} value={form.department} onChange={e => set('department', e.target.value)} aria-label="Department" data-testid="w-dept">
                                     <option value="">None</option>{depts.map(d => <option key={d.id} value={d.name}>{d.name}</option>)}</select>
                                 {depts.length === 0 && <p className="mt-1 text-[11.5px] text-slate-400">No departments yet. Use the Departments button to add some.</p>}</div>
-                            <div><Label><FieldLabel required>Day rate (₹ per shift)</FieldLabel></Label><Input className="mt-1 font-mono" inputMode="decimal" value={form.day_rate} onChange={e => set('day_rate', decimal(e.target.value))} aria-label="Day rate per shift" data-testid="w-day" /></div>
-                            <div><Label><FieldLabel required={!form.night_same}>Night rate (₹ per shift)</FieldLabel></Label>
-                                <Input className="mt-1 font-mono" inputMode="decimal" disabled={form.night_same} value={form.night_same ? form.day_rate : form.night_rate} onChange={e => set('night_rate', decimal(e.target.value))} aria-label="Night rate per shift" data-testid="w-night" /></div>
+                            <div className="sm:col-span-2"><Label><FieldLabel>Paid by</FieldLabel></Label>
+                                <div className="mt-1 inline-flex rounded-lg bg-slate-100 p-0.5" role="group" aria-label="Paid by">
+                                    {[['shift', 'Shift'], ['time', 'Hours (time based)']].map(([v, l]) => (
+                                        <button key={v} type="button" aria-pressed={form.pay_type === v} onClick={() => set('pay_type', v)} data-testid={`w-type-${v}`}
+                                            className={`rounded-md px-3 py-1.5 text-[12.5px] font-medium transition-colors ${form.pay_type === v ? 'bg-white text-brand shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{l}</button>))}
+                                </div>
+                                <p className="mt-1 text-[11.5px] text-slate-400">{form.pay_type === 'time' ? 'Enter the salary for a full day and how many hours that day is. Each week you enter hours worked, and pay follows the hours.' : 'A fixed amount for each shift worked.'}</p></div>
+                            <div><Label><FieldLabel required>{form.pay_type === 'time' ? 'Salary per day (₹)' : 'Day rate (₹ per shift)'}</FieldLabel></Label><Input className="mt-1 font-mono" inputMode="decimal" value={form.day_rate} onChange={e => set('day_rate', decimal(e.target.value))} aria-label={form.pay_type === 'time' ? 'Salary per day (day shift)' : 'Day rate per shift'} data-testid="w-day" /></div>
+                            <div><Label><FieldLabel required={!form.night_same}>{form.pay_type === 'time' ? 'Night salary per day (₹)' : 'Night rate (₹ per shift)'}</FieldLabel></Label>
+                                <Input className="mt-1 font-mono" inputMode="decimal" disabled={form.night_same} value={form.night_same ? form.day_rate : form.night_rate} onChange={e => set('night_rate', decimal(e.target.value))} aria-label={form.pay_type === 'time' ? 'Night salary per day' : 'Night rate per shift'} data-testid="w-night" /></div>
+                            {form.pay_type === 'time' && (
+                                <div className="sm:col-span-2"><Label><FieldLabel required>Working hours per day</FieldLabel></Label>
+                                    <div className="mt-1 flex items-center gap-3">
+                                        <Input className="w-28 font-mono" inputMode="decimal" value={form.hours} onChange={e => set('hours', decimal(e.target.value))} aria-label="Working hours per day" data-testid="w-hours" />
+                                        <p className="text-[12px] text-slate-500" data-testid="w-hourly">{perHour(form.day_rate, form.hours) > 0 && <>Day: about ₹{perHour(form.day_rate, form.hours).toFixed(2)} an hour{!form.night_same && perHour(form.night_rate, form.hours) > 0 && <> · night: about ₹{perHour(form.night_rate, form.hours).toFixed(2)} an hour</>}</>}</p>
+                                    </div></div>)}
                             <label className="flex cursor-pointer items-center gap-2 text-[12.5px] text-slate-600 sm:col-span-2">
                                 <input type="checkbox" checked={form.night_same} onChange={e => set('night_same', e.target.checked)} data-testid="w-same" /> Night rate is the same as the day rate
                             </label>
