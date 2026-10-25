@@ -94,4 +94,11 @@ export const content = {
   rateError: 'Too many enquiries. Please try again in an hour, or call us.',
   privacy: 'Your details will be used to respond to this enquiry.',
   footerLine: 'Men’s and women’s wear from Tiruppur.', copyright: 'Victoria Garments. All rights reserved.',
+  formTitle: 'Request a quote', formIntro: 'Tell us about your garments. We reply by phone or email.',
+  interestLabel: 'I’m interested in', interests: ['Men’s wear', 'Women’s wear', 'Both', 'Not sure yet'],
+  optionalTag: 'Optional', emailLabel: 'Email us', visitLabel: 'Visit us', hoursLabel: 'Hours',
+  placeholders: { name: 'Your name', company: 'Your company', email: 'you@example.com', phone: '+91', message: 'Styles, quantities, fabrics and when you need them' },
+  successTitle: 'Enquiry received', successNote: 'We will get back to you by phone or email.', again: 'Send another enquiry',
+  footerCtaTitle: 'Ready when you are.', footerCtaText: 'Share your garment requirements and we will get in touch.',
+  footerExplore: 'Explore', footerContact: 'Get in touch', backToTop: 'Back to top',
 };

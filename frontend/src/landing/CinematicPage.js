@@ -6,6 +6,7 @@ import { Hero } from './sections/Hero';
 import { Statement, About, Collections } from './sections/Editorial';
 import { Reel, Process, Gallery, HowToStart } from './sections/Stories';
 import { Contact } from './sections/Contact';
+import { ArrowUp, ArrowUpRight, Clock, Mail, MapPin, Phone } from 'lucide-react';
 import './landing.css';
 
 const OPTIONAL = ['certifications', 'clients', 'markets', 'testimonials'];
@@ -18,9 +19,22 @@ function OptionalSections() {
 
 function Footer() {
   const reduced = useReducedMotion();
-  return <footer className="vg-footer"><div className="vg-container"><m.div className="vg-footer-wordmark" initial={reduced ? false : { y: 70 }} whileInView={{ y: 0 }} viewport={{ once: true }} transition={{ duration: 0.9 }}><img src="/victoria-logo-white.svg" width="1200" height="295" alt={c.logoAlt} /></m.div>
-    <div className="vg-footer-top"><p>{c.footerLine}</p><nav aria-label={c.menu}>{c.nav.map(([id, label]) => <a key={id} href={`#${id}`} data-testid={`footer-nav-${id}`}>{label}</a>)}</nav></div>
-    <div className="vg-footer-bottom"><span>© {new Date().getFullYear()} {c.copyright}</span><span>{c.imageNote}</span></div></div></footer>;
+  return <footer className="vg-footer"><div className="vg-container">
+    <div className="vg-footer-cta"><div><h2>{c.footerCtaTitle}</h2><p>{c.footerCtaText}</p></div>
+      <a className="vg-button vg-button-light" href="#contact" data-testid="footer-quote">{c.quote}<ArrowUpRight size={17} aria-hidden="true" /></a></div>
+    <div className="vg-footer-grid">
+      <div className="vg-footer-brand"><img src="/victoria-logo-white.svg" width="231" height="48" alt={c.logoAlt} /><p>{c.footerLine}</p><p>{c.location}</p></div>
+      <nav aria-label={c.menu}><h3>{c.footerExplore}</h3>{c.nav.map(([id, label]) => <a key={id} href={`#${id}`} data-testid={`footer-nav-${id}`}>{label}</a>)}</nav>
+      <div className="vg-footer-contact"><h3>{c.footerContact}</h3>
+        <a href={`tel:${c.phoneHref}`} data-testid="footer-phone"><Phone size={17} aria-hidden="true" />{c.phone}</a>
+        <a href={`mailto:${c.email}`} data-testid="footer-email"><Mail size={17} aria-hidden="true" />{c.email}</a>
+        {c.address && <span><MapPin size={17} aria-hidden="true" />{c.address}</span>}
+        {c.hours && <span><Clock size={17} aria-hidden="true" />{c.hours}</span>}</div>
+    </div>
+    <div className="vg-footer-bottom"><span>© {new Date().getFullYear()} {c.copyright}</span><span className="vg-footer-note">{c.imageNote}</span>
+      <button type="button" className="vg-top-btn" onClick={() => window.scrollTo({ top: 0, behavior: reduced ? 'auto' : 'smooth' })} data-testid="footer-top">{c.backToTop}<ArrowUp size={16} aria-hidden="true" /></button></div>
+  </div>
+  <m.div className="vg-footer-wordmark" aria-hidden="true" initial={reduced ? false : { y: 60 }} whileInView={{ y: 0 }} viewport={{ once: true }} transition={{ duration: 0.9 }}><img src="/victoria-logo-white.svg" width="1200" height="251" alt="" /></m.div></footer>;
 }
 
 export default function CinematicPage() {
