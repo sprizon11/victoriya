@@ -19,8 +19,9 @@ Run with the API on `:8000`: `backend\.venv\Scripts\python.exe backend\<file>.py
 | `test_phase4.py` | 109 | Stock ledger (two units), POs, receiving, expenses, bill files |
 | `test_phase5.py` | 67 | Costing, closing report, year-end rollover, email through a local SMTP sink |
 | `test_phase6.py` | 43 | Dashboard per role, speed on 40,000 entries, Lot DNA |
-| Frontend (`craco test`) | 15 | `plannedFromOrder` agrees with the server; local-date helper |
-| **Total** | **558** | |
+| `test_salary.py` | 62 | Weekly salary: day/night shifts, rates kept per saved week, advance cap, no ESI/PF/piece rate, Excel and payslip PDF |
+| Frontend (`craco test`) | 22 | `plannedFromOrder` agrees with the server; local-date helper; Saturday-to-Friday pay weeks |
+| **Total** | **627** | |
 
 `npm run build` compiles with no warnings.
 
@@ -62,6 +63,7 @@ dashboard overview **0.53 s**, lots list **0.03 s**. Both are single aggregation
 
 - All 24 screens were loaded at 390 px: **no horizontal page overflow** on any of them (tables scroll inside
   their container).
+- The four Salary screens were checked in the browser at desktop and 375 px (no page overflow; the 7-day shift grid fits a phone without scrolling). Typing a second department name before the first request returned used to join the two; fixed.
 - Quantity grids: Enter / arrows / paste from Excel / select-on-focus, caret never reformatted while typing.
 - Unsaved-changes warning on the lot form; double-submit prevented by the button's loading state.
 

@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import {
     LayoutDashboard, Users, Scissors, Package, Palette, Ruler,
     ClipboardList, IndianRupee, FileBarChart, Receipt,
-    Settings, LogOut, Menu, X, UserCog, CalendarDays, Wallet, Bell, Check, History, ShieldCheck, Coins, Boxes, FileText, Wrench
+    Settings, LogOut, Menu, X, UserCog, CalendarDays, Wallet, Bell, Check, History, ShieldCheck, Coins, Boxes, FileText, Wrench, Calculator, CalendarCheck, HardHat
 } from 'lucide-react';
 
 /** Grouped so a 14-item sidebar reads as four short lists instead of one wall. */
@@ -31,6 +31,15 @@ const navGroups = [
         items: [
             { path: '/stock', label: 'Stock', icon: Boxes, roles: ['admin', 'accounts'] },
             { path: '/purchase-orders', label: 'Purchase orders', icon: FileText, roles: ['admin', 'accounts'] },
+        ],
+    },
+    {
+        label: 'Salary',
+        items: [
+            { path: '/salary', label: 'Calculator', icon: Calculator, roles: ['admin', 'accounts'] },
+            { path: '/salary/week', label: 'This week', icon: CalendarCheck, roles: ['admin', 'accounts'] },
+            { path: '/salary/history', label: 'History', icon: History, roles: ['admin', 'accounts'] },
+            { path: '/salary/workers', label: 'Workers', icon: HardHat, roles: ['admin', 'accounts'] },
         ],
     },
     {
@@ -70,7 +79,7 @@ const navGroups = [
 const LOGO_WHITE = "/victoria-logo-mark.png";
 
 const isActive = (path, pathname) =>
-    path === '/' ? pathname === '/' : pathname.startsWith(path);
+    path === '/' || path === '/salary' ? pathname === path : pathname.startsWith(path);
 
 export default function Layout({ children }) {
     const { user, logout } = useAuth();

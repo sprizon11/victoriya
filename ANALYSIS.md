@@ -337,3 +337,17 @@ deductions are unchanged.
 | Dashboard / DNA | `backend/dashboard.py`, `backend/dna.py` | One aggregated payload per role; DNA code is an HMAC of the lot id. |
 
 See `docs/QA-REPORT.md` for what was tested and what was not.
+
+## 10. Weekly salary (separate from piece-rate payroll)
+
+A second pay system for people paid by the shift, modelled on the owner's reference calculator and kept apart from lot payroll.
+
+| Area | Where | Notes |
+|---|---|---|
+| API | `backend/salary.py`, prefix `/api/salary` | Departments, workers, one entry per worker per pay week, history, Excel export, payslip PDFs. Admin and finance-visible accounts only. |
+| Pay week | Saturday to Friday | `weekStartOf` in `frontend/src/lib/utils.js` and `week_start_of` in the backend agree (both tested). |
+| Shifts | `day_shifts[7]`, `night_shifts[7]` | Multiples of 0.5 up to 3 a day. Day and night have their own rate; a worker with no night rate follows the day rate. |
+| Not included | | No piece rate, no ESI, no PF, as asked. Gross minus advance is net pay. |
+| Rates | Snapshot per saved week | Changing a worker's rate never rewrites a paid week unless "use today's rates" is ticked. |
+| Advance | In the calculator | Cannot exceed the week's gross. Separate from the lot-payroll Advances page. |
+| Screens | `/salary`, `/salary/week`, `/salary/history`, `/salary/workers` | Calculator, saved week, history, worker and department list. Export to Excel on the week and history pages; clear-week is admin only and keeps a copy in `salary_cleared`. |

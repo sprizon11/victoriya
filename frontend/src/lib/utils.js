@@ -23,3 +23,24 @@ const pad = (n) => String(n).padStart(2, '0');
 export function localDate(d = new Date()) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
+
+/** The Saturday on or before a YYYY-MM-DD date: pay weeks run Saturday to Friday. */
+export function weekStartOf(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() - ((dt.getDay() + 1) % 7));      // getDay(): Sun=0 ... Sat=6
+  return localDate(dt);
+}
+
+export function addDays(dateStr, n) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + n);
+  return localDate(dt);
+}
+
+/** 24/10/2026 style, as the owner's reference calculator shows it. */
+export function dmy(dateStr) {
+  const [y, m, d] = dateStr.split('-');
+  return `${d}/${m}/${y}`;
+}

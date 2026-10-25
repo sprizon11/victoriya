@@ -33,6 +33,10 @@ const YearEndPage = React.lazy(() => import('./pages/YearEndPage'));
 const LotDnaPage = React.lazy(() => import('./pages/LotDnaPage'));
 const PurchaseOrdersPage = React.lazy(() => import('./pages/PurchaseOrdersPage'));
 const ExpensesPage = React.lazy(() => import('./pages/ExpensesPage'));
+const SalaryCalculatorPage = React.lazy(() => import('./pages/SalaryCalculatorPage'));
+const SalaryWeekPage = React.lazy(() => import('./pages/SalaryWeekPage'));
+const SalaryHistoryPage = React.lazy(() => import('./pages/SalaryHistoryPage'));
+const SalaryWorkersPage = React.lazy(() => import('./pages/SalaryWorkersPage'));
 const PublicLanding = () => <Suspense fallback={<div className="p-8">Victoria Garments</div>}><Landing /></Suspense>;
 
 function ProtectedRoute({ children, roles }) {
@@ -65,6 +69,10 @@ function AppRoutes() {
             <Route path="/stock" element={<ProtectedRoute roles={['admin', 'accounts']}><Suspense fallback={<div>Loading...</div>}><StockPage /></Suspense></ProtectedRoute>} />
             <Route path="/purchase-orders" element={<ProtectedRoute roles={['admin', 'accounts']}><Suspense fallback={<div>Loading...</div>}><PurchaseOrdersPage /></Suspense></ProtectedRoute>} />
             <Route path="/expenses" element={<ProtectedRoute roles={['admin', 'accounts']}><Suspense fallback={<div>Loading...</div>}><ExpensesPage /></Suspense></ProtectedRoute>} />
+            <Route path="/salary" element={<ProtectedRoute roles={['admin', 'accounts']}><Suspense fallback={<div>Loading...</div>}><SalaryCalculatorPage /></Suspense></ProtectedRoute>} />
+            <Route path="/salary/week" element={<ProtectedRoute roles={['admin', 'accounts']}><Suspense fallback={<div>Loading...</div>}><SalaryWeekPage /></Suspense></ProtectedRoute>} />
+            <Route path="/salary/history" element={<ProtectedRoute roles={['admin', 'accounts']}><Suspense fallback={<div>Loading...</div>}><SalaryHistoryPage /></Suspense></ProtectedRoute>} />
+            <Route path="/salary/workers" element={<ProtectedRoute roles={['admin', 'accounts']}><Suspense fallback={<div>Loading...</div>}><SalaryWorkersPage /></Suspense></ProtectedRoute>} />
             <Route path="/rate-types" element={<ProtectedRoute roles={['admin']}><Suspense fallback={<div>Loading...</div>}><RateTypesPage /></Suspense></ProtectedRoute>} />
             <Route path="/audit" element={<ProtectedRoute roles={['admin']}><Suspense fallback={<div>Loading...</div>}><AuditPage /></Suspense></ProtectedRoute>} />
             <Route path="/operators" element={<ProtectedRoute roles={['admin']}><OperatorsPage /></ProtectedRoute>} />

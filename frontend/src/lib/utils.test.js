@@ -33,3 +33,23 @@ describe('localDate', () => {
     expect(localDate(new Date(2026, 0, 5))).toBe('2026-01-05');
   });
 });
+
+import { weekStartOf, addDays, dmy } from './utils';
+
+describe('pay weeks run Saturday to Friday', () => {
+  test.each([
+    ['2026-10-24', '2026-10-24'],   // a Saturday is its own start
+    ['2026-10-25', '2026-10-24'],   // Sunday
+    ['2026-10-28', '2026-10-24'],   // Wednesday
+    ['2026-10-30', '2026-10-24'],   // Friday is the last day
+    ['2026-10-31', '2026-10-31'],   // next Saturday starts the next week
+    ['2026-01-01', '2025-12-27'],   // crosses the year
+  ])('%s belongs to the week of %s', (day, start) => {
+    expect(weekStartOf(day)).toBe(start);
+  });
+  test('addDays and dmy', () => {
+    expect(addDays('2026-10-24', 7)).toBe('2026-10-31');
+    expect(addDays('2026-03-01', -1)).toBe('2026-02-28');
+    expect(dmy('2026-10-24')).toBe('24/10/2026');
+  });
+});

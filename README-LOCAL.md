@@ -188,6 +188,7 @@ backend\.venv\Scripts\python.exe backend\test_phase3.py
 backend\.venv\Scripts\python.exe backend\test_phase4.py
 backend\.venv\Scripts\python.exe backend\test_phase5.py
 backend\.venv\Scripts\python.exe backend\test_phase6.py
+backend\.venv\Scripts\python.exe backend\test_salary.py
 ```
 
 `test_phase5.py` needs the dev-only test tools (`pip install -r backend\requirements-dev.txt`) and a
