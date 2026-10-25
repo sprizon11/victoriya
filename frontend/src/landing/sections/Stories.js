@@ -31,7 +31,7 @@ export function Process() {
   useEffect(() => scrollYProgress.on('change', value => setActive(Math.min(4, Math.floor(value * 5)))), [scrollYProgress]);
   return <section id="process" className="vg-process" ref={ref}><div className="vg-process-pin"><div className="vg-container vg-process-heading"><p className="vg-eyebrow">{c.processLabel}</p><h2>{c.processTitle}</h2><p>{c.processIntro}</p></div>
     <div className="vg-process-viewport"><m.ol className="vg-process-track" style={reduced ? undefined : { x }}>{c.steps.map((step, index) => <li key={step.image} className={active === index ? 'vg-step-active' : ''}>
-      <div className="vg-process-media"><Image name={`process-${step.image}-v3`} alt={step.alt} width={1280} height={960} sizes="(max-width: 800px) 100vw, 65vw" /><span className="vg-image-chip">{c.imageCaption}</span></div>
+      <div className="vg-process-media"><Image name={`process-${step.image}-v3`} alt={step.alt} width={1280} height={960} sizes="(max-width: 800px) 100vw, 65vw" /></div>
       <div className="vg-step-copy"><span>{String(index + 1).padStart(2, '0')} / 05</span><h3>{step.title}</h3><p>{step.detail}</p></div>
     </li>)}</m.ol></div>
     <div className="vg-process-progress vg-container"><m.div className="vg-stitch" style={reduced ? undefined : { scaleX: pathLength }} /><div>{c.steps.map((step, index) => <span className={active === index ? 'vg-current' : ''} key={step.image}>{String(index + 1).padStart(2, '0')}</span>)}</div></div>
@@ -71,7 +71,7 @@ export function Gallery() {
     <AnimatePresence>{selected !== null && <m.div className="vg-lightbox" role="dialog" aria-modal="true" aria-label={c.galleryTitle} data-testid="gallery-lightbox" initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }} exit={reduced ? {} : { opacity: 0 }}>
       <button ref={closeRef} className="vg-lightbox-close" type="button" onClick={() => setSelected(null)} aria-label={c.galleryClose} data-testid="lightbox-close"><X/></button>
       <button type="button" onClick={() => setSelected((selected + items.length - 1) % items.length)} aria-label={c.galleryPrevious} data-testid="lightbox-previous"><ArrowLeft/></button>
-      <figure>{items[selected].image ? <Image name={items[selected].image} alt={items[selected].alt} width={1280} height={1280} sizes="85vw" /> : <img src={items[selected].src} alt={items[selected].alt} width={items[selected].width} height={items[selected].height}/>}<figcaption>{c.imageCaption}</figcaption></figure>
+      <figure>{items[selected].image ? <Image name={items[selected].image} alt={items[selected].alt} width={1280} height={1280} sizes="85vw" /> : <img src={items[selected].src} alt={items[selected].alt} width={items[selected].width} height={items[selected].height}/>}</figure>
       <button type="button" onClick={() => setSelected((selected + 1) % items.length)} aria-label={c.galleryNext} data-testid="lightbox-next"><ArrowRight/></button>
     </m.div>}</AnimatePresence>
   </section>;

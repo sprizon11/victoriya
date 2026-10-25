@@ -32,6 +32,15 @@ test('public landing has no staff login link', () => {
   expect(page.body.textContent).not.toContain('Staff login');
 });
 
+test('hero stays simple and the statement band and image chips are absent', () => {
+  const page = new DOMParser().parseFromString(markup(), 'text/html');
+  expect(page.querySelector('.vg-statement')).toBeNull();
+  expect(page.querySelector('[data-testid="hero-quote"]')).toBeNull();
+  expect(page.querySelector('[data-testid="hero-call"]')).toBeNull();
+  expect(page.querySelector('.vg-image-chip')).toBeNull();
+  expect(page.querySelector('[data-testid="nav-quote"]')).not.toBeNull();
+});
+
 test('a confirmed optional section appears only when supplied', () => {
   content.certifications.push('Verified test certification');
   try {

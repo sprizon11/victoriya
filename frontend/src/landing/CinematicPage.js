@@ -3,7 +3,7 @@ import { LazyMotion, domAnimation, m, useReducedMotion } from 'framer-motion';
 import { content as c } from './content';
 import { Header } from './sections/Header';
 import { Hero } from './sections/Hero';
-import { Statement, About, Collections } from './sections/Editorial';
+import { About, Collections } from './sections/Editorial';
 import { Reel, Process, Gallery, HowToStart } from './sections/Stories';
 import { Contact } from './sections/Contact';
 import { ArrowUp, ArrowUpRight, Clock, Mail, MapPin, Phone } from 'lucide-react';
@@ -78,7 +78,7 @@ export default function CinematicPage() {
     <link rel="preload" as="image" type="image/webp" href="/landing/hero-knits-1280.webp" imageSrcSet={[640,960,1280,1920,2560].map(width => `/landing/hero-knits-${width}.webp ${width}w`).join(', ')} imageSizes="100vw" />
     <a className="vg-skip" href="#main" data-testid="landing-skip">{c.skip}</a>
     <Header />
-    <main id="main"><Hero/><Statement/><About/><Collections onChoose={chooseRange}/><Reel/><Process/><Gallery/><HowToStart/><OptionalSections/><Contact selectedRange={selectedRange} onRangeHandled={clearRange}/></main>
+    <main id="main"><Hero/><About/><Collections onChoose={chooseRange}/><Reel/><Process/><Gallery/><HowToStart/><OptionalSections/><Contact selectedRange={selectedRange} onRangeHandled={clearRange}/></main>
     <Footer/>
   </div></LazyMotion>;
 }

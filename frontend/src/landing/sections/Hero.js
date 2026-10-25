@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, m, useReducedMotion, useScroll, useTransform } from 'framer-motion';
-import { ArrowUpRight, Phone } from 'lucide-react';
 import { content as c } from '../content';
 import { Image } from './Image';
 import { ease } from '../motion';
@@ -46,11 +45,7 @@ export function Hero() {
       <p className="vg-eyebrow">{c.eyebrow}</p>
       <h1>{c.headline.split('\n').map((line, index) => <span className="vg-headline-mask" key={line}><m.span initial={reduced ? false : { y: '110%' }} animate={reduced ? undefined : { y: '0%' }} transition={{ duration: 0.85, ease, delay: index * 0.12 }}>{line}</m.span></span>)}</h1>
       <m.p className="vg-hero-intro" initial={reduced ? false : { opacity: 0, y: 16 }} animate={reduced ? undefined : { opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.5 }}>{c.intro}</m.p>
-      <m.div className="vg-actions" initial={reduced ? false : { opacity: 0, y: 16 }} animate={reduced ? undefined : { opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.6 }}>
-        <a className="vg-button vg-button-light" href="#contact" data-testid="hero-quote">{c.quote}<ArrowUpRight size={18}/></a>
-        <a className="vg-button vg-button-outline" href={`tel:${c.phoneHref}`} data-testid="hero-call"><Phone size={18}/>{c.call}</a>
-      </m.div>
     </m.div>
-    <div className="vg-hero-bottom vg-container"><span className="vg-scroll-cue">{c.scrollCue}<span /></span><span className="vg-image-chip">{c.imageCaption}</span></div>
+    <div className="vg-hero-bottom vg-container"><span className="vg-scroll-cue">{c.scrollCue}<span /></span></div>
   </section>;
 }
