@@ -43,10 +43,11 @@ class ApprovalExpired(Exception):
     """The thing being changed is no longer what was requested."""
 
 
-def register(type_, *, prepare=None, apply=None):
+def register(type_, *, prepare=None, apply=None, reject=None):
     """prepare(user, entity_id, payload) -> (label, clean_payload, snapshot)
-    apply(approval, reviewer, request) -> dict describing what was applied"""
-    HANDLERS[type_] = {"prepare": prepare, "apply": apply}
+    apply(approval, reviewer, request) -> dict describing what was applied
+    reject(approval, reviewer, request) -> optional clean-up when it is refused"""
+    HANDLERS[type_] = {"prepare": prepare, "apply": apply, "reject": reject}
 
 
 async def policies():
@@ -260,6 +261,9 @@ async def _decide(approval_id: str, action: str, data: Decision, request: Reques
             raise HTTPException(500, "Could not apply this change")
     else:
         update["status"] = "rejected"
+        on_reject = (HANDLERS.get(doc["type"]) or {}).get("reject")
+        if on_reject:
+            await on_reject(doc, user, request)
     await db.approvals.update_one({"_id": oid}, {"$set": update})
 
     verb = {"approved": "Approved", "rejected": "Rejected", "expired": "Expired"}[update["status"]]

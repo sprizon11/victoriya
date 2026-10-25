@@ -31,6 +31,10 @@ from audit import router as audit_router, audit_middleware, note, log_event
 import approvals
 from groups import router as groups_router, group_name_for
 import ratetypes
+import stock
+import purchasing
+import expenses
+from purchasing import RequirementIn, build_requirements, clean_post_pct, lot_planned_total, generate_pos_for_lot
 from ratetypes import default_rate_type, get_rate_type
 from lotmath import (planned_from_order, compute_earnings, parse_money, clean_size_rates,
                      lot_op_rates, find_rate, average_rate)
@@ -157,6 +161,8 @@ class LotCreate(BaseModel):
     operations: List[LotOperationEntry]
     allowance_pct: float = 0
     quantity_control: Optional[dict] = None
+    requirements: Optional[List[RequirementIn]] = None
+    post_pct: float = 0                          # material wastage buffer added when ordering
 
 class LotUpdate(BaseModel):
     style_name: Optional[str] = None
@@ -167,6 +173,8 @@ class LotUpdate(BaseModel):
     operations: Optional[List[LotOperationEntry]] = None
     allowance_pct: Optional[float] = None
     quantity_control: Optional[dict] = None
+    requirements: Optional[List[RequirementIn]] = None
+    post_pct: Optional[float] = None
 
 class ProductionBatchEntry(BaseModel):
     operator_id: str
@@ -726,12 +734,19 @@ async def create_lot(data: LotCreate, request: Request):
         "colors": colors, "operations": operations,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
+    post_pct = clean_post_pct(data.post_pct)
+    doc["post_pct"] = post_pct
+    doc["requirements"] = await build_requirements(data.requirements or [], lot_planned_total(doc), post_pct)
     result = await db.lots.insert_one(doc)
     doc["id"] = str(result.inserted_id)
     doc.pop("_id", None)
+    # drafted, never sent: releasing a purchase order is an approval
+    drafts = await generate_pos_for_lot({**doc, "_id": result.inserted_id}, user) if doc["requirements"] else []
     note(request, entity_type="lot", entity_id=doc["id"], label=lot_number,
-         summary=f"Created lot {lot_number} ({data.style_name})")
-    return await enrich_lot(doc)
+         summary=f"Created lot {lot_number} ({data.style_name})" + (f"; drafted {len(drafts)} purchase order(s)" if drafts else ""))
+    out = await enrich_lot(doc)
+    out["draft_pos"] = [{"id": d["id"], "po_number": d["po_number"], "supplier_name": d["supplier_name"]} for d in drafts]
+    return out
 
 @api_router.get("/lots/{lot_id}")
 async def get_lot(lot_id: str, request: Request):
@@ -816,6 +831,16 @@ async def update_lot(lot_id: str, data: LotUpdate, request: Request):
         if problems:
             raise HTTPException(400, "; ".join(sorted(set(problems))))
         update["colors"] = colors
+
+    post_pct = clean_post_pct(data.post_pct) if data.post_pct is not None else prior.get("post_pct", 0)
+    if data.post_pct is not None:
+        update["post_pct"] = post_pct
+    plan_total_after = lot_planned_total({"colors": update["colors"]}) if "colors" in update else lot_planned_total(prior)
+    if data.requirements is not None or data.post_pct is not None or plan_total_after != lot_planned_total(prior):
+        raw = data.requirements if data.requirements is not None else [
+            RequirementIn(item_id=r["item_id"], basis=r["basis"], qty_per_piece=r.get("qty_per_piece"), total_qty=r.get("total_qty"))
+            for r in prior.get("requirements", [])]
+        update["requirements"] = await build_requirements(raw, plan_total_after, post_pct)
 
     if data.operations is not None:
         operations = await build_lot_operations(data.operations, sizes, strict_operators=False)
@@ -2421,7 +2446,9 @@ async def reset_all_data(request: Request):
     collections_to_clear = ["operators", "operations", "colors_master", "size_charts",
                             "weeks", "lots", "production_entries", "advances",
                             "notifications", "edit_requests", "counters", "system_settings", "login_attempts",
-                            "enquiries", "rate_limits", "approvals", "operator_groups", "operation_groups", "rate_types"]
+                            "enquiries", "rate_limits", "approvals", "operator_groups", "operation_groups", "rate_types",
+                            "stock_items", "suppliers", "stock_movements", "purchase_orders", "expense_categories", "expenses",
+                            "bills.files", "bills.chunks"]
     note(request, entity_type="system", summary="ALL DATA RESET by admin (audit log is kept)")
     cleared = []
     for col in collections_to_clear:
@@ -2564,6 +2591,14 @@ async def startup():
     await db.audit_logs.create_index("action")
     await db.approvals.create_index([("status", 1), ("requested_at", -1)])
     await db.approvals.create_index("requested_by")
+    await db.stock_movements.create_index([("item_id", 1), ("created_at", 1)])
+    await db.stock_movements.create_index([("lot_id", 1), ("item_id", 1)])
+    await db.stock_movements.create_index("po_id")
+    await db.purchase_orders.create_index([("status", 1), ("created_at", -1)])
+    await db.purchase_orders.create_index("lot_id")
+    await db.expenses.create_index([("date", -1)])
+    await db.expenses.create_index([("vendor", 1), ("bill_no", 1)])
+    await db.expenses.create_index("lot_id")
     await db.operators.create_index("group_id")
     await db.operations.create_index("group_id")
     await db.approvals.create_index("legacy_id", unique=True, sparse=True)
@@ -2602,6 +2637,9 @@ app.include_router(audit_router)
 app.include_router(approvals.router)
 app.include_router(groups_router)
 app.include_router(ratetypes.router)
+app.include_router(stock.router)
+app.include_router(purchasing.router)
+app.include_router(expenses.router)
 app.middleware("http")(audit_middleware)
 
 # ===== CORS =====
