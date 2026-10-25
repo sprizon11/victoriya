@@ -292,7 +292,7 @@ Run `backend\.venv\Scripts\python.exe backend/test_enquiries.py` alongside the m
 regression suite. These tests create and remove only their own enquiry/user
 fixtures, and preserve the prior local quota and notification read states.
 
-## Landing page v2
+## Landing page v2 (superseded visual design)
 
 The public page now uses the official vector logo and blue theme. The logged-out root
 and `/home` show the public page; staff links keep their existing routing. The
@@ -312,3 +312,20 @@ CairoSVG packages are needed only to generate assets; the deployed application
 has no new runtime dependency. The landing render test is in
 `frontend/src/landing/LandingPage.test.js`, and the SEO route test is
 `backend/test_public_seo.py`.
+
+## Landing page v3
+
+The public `/home` page now uses cinematic photography, light and deep-ink sections,
+and Framer Motion choreography. The official white and colour logos switch with
+the header surface. All 26 new scenes are illustrative; their prompts, provenance,
+export sizes and regeneration command are in `frontend/public/landing/ASSETS.md`.
+The production page uses responsive WebP with JPEG fallbacks. Only its first hero
+frame is preloaded; all later images load lazily. Reduced-motion users see a
+static hero, vertical process and swipeable image reel.
+
+Framer Motion `12.43.0` is pinned exactly in `frontend/package.json` for the
+landing's lazy chunk. It is not imported by the staff pages. The public enquiry
+POST, honeypot, five-per-hour IP quota and plain-text validation are unchanged.
+The business-fact placeholders and optional sections remain in
+`frontend/src/landing/content.js`. To verify locally, run the landing Jest test,
+`backend/test_enquiries.py`, `backend/test_api.py` and `npm run build`.
