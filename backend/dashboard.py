@@ -113,6 +113,15 @@ async def overview(request: Request, fy: Optional[str] = Query(None, pattern=r"^
     out["trend"] = {"days": days, "groups": groups, "rows": [{"date": d, **{g: series.get(d, {}).get(g, 0) for g in groups}} for d in days]}
     out["spark_pieces"] = [{"d": d, "v": sum(series.get(d, {}).values())} for d in days[-14:]]
 
+    # ---------------- today, against a usual day. There is no target setting, so the benchmark is the average of the
+    # last 7 days that had any output (never a made-up figure).
+    if role != "data_entry":
+        busy = [sum(series.get(d, {}).values()) for d in days[-8:-1]]
+        busy = [v for v in busy if v > 0]
+        out["today_summary"] = {"pieces": sum(series.get(t, {}).values()), "usual_day": round(sum(busy) / len(busy)) if busy else 0,
+                                "entries": await db.production_entries.count_documents({"date": t}),
+                                "lots": len(await db.production_entries.distinct("lot_id", {"date": t}))}
+
     # ---------------- by group (never for a data-entry user's money, but output counts are fine)
     async def by_group(field):
         rows = []
