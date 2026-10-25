@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 from core import *  # noqa: F401,F403
 from audit import router as audit_router, audit_middleware, note, log_event
 import approvals
+from groups import router as groups_router, group_name_for
 from approvals import ApprovalExpired, record_auto
 
 
@@ -83,17 +84,21 @@ class UserUpdate(BaseModel):
 
 class OperatorCreate(BaseModel):
     name: str
+    group_id: Optional[str] = None
 
 class OperatorUpdate(BaseModel):
     name: Optional[str] = None
     active: Optional[bool] = None
+    group_id: Optional[str] = None          # "" removes the group
 
 class OperationCreate(BaseModel):
     name: str
+    group_id: Optional[str] = None
 
 class OperationUpdate(BaseModel):
     name: Optional[str] = None
     active: Optional[bool] = None
+    group_id: Optional[str] = None          # "" removes the group
 
 class ColorMasterCreate(BaseModel):
     name: str
@@ -261,8 +266,10 @@ async def get_operators(request: Request):
 async def create_operator(data: OperatorCreate, request: Request):
     user = await get_current_user(request)
     check_role(user, ["admin"])
+    gid, gname = await group_name_for(db.operator_groups, data.group_id)
     code = await get_next_operator_code()
     doc = {"name": data.name, "operator_code": code, "display_name": f"{data.name} ({code})",
+           "group_id": gid, "group_name": gname,
            "active": True, "created_at": datetime.now(timezone.utc).isoformat()}
     result = await db.operators.insert_one(doc)
     note(request, entity_type="operator", entity_id=str(result.inserted_id), label=doc.get("display_name", ""), summary=f"Created operator " + str(doc.get("display_name", "")))
@@ -275,6 +282,9 @@ async def update_operator(operator_id: str, data: OperatorUpdate, request: Reque
     update = {k: v for k, v in data.model_dump().items() if v is not None}
     if not update:
         raise HTTPException(400, "No fields to update")
+    if "group_id" in update:
+        gid, gname = await group_name_for(db.operator_groups, update["group_id"])
+        update.update(group_id=gid, group_name=gname)
     if "name" in update:
         op = await db.operators.find_one({"_id": ObjectId(operator_id)})
         if op:
@@ -308,10 +318,13 @@ async def create_operation(data: OperationCreate, request: Request):
     existing = await db.operations.find_one({"name": {"$regex": f"^{data.name}$", "$options": "i"}})
     if existing:
         raise HTTPException(400, f"Operation '{data.name}' already exists")
-    doc = {"name": data.name, "active": True, "created_at": datetime.now(timezone.utc).isoformat()}
+    gid, gname = await group_name_for(db.operation_groups, data.group_id)
+    doc = {"name": data.name, "group_id": gid, "group_name": gname,
+           "active": True, "created_at": datetime.now(timezone.utc).isoformat()}
     result = await db.operations.insert_one(doc)
     note(request, entity_type="operation", entity_id=str(result.inserted_id), label=doc.get("name", ""), summary=f"Created operation " + str(doc.get("name", "")))
-    return {"id": str(result.inserted_id), "name": data.name, "active": True, "created_at": doc["created_at"]}
+    return {"id": str(result.inserted_id), "name": data.name, "active": True, "created_at": doc["created_at"],
+            "group_id": gid, "group_name": gname}
 
 @api_router.put("/operations/{operation_id}")
 async def update_operation(operation_id: str, data: OperationUpdate, request: Request):
@@ -320,6 +333,9 @@ async def update_operation(operation_id: str, data: OperationUpdate, request: Re
     update = {k: v for k, v in data.model_dump().items() if v is not None}
     if not update:
         raise HTTPException(400, "No fields to update")
+    if "group_id" in update:
+        gid, gname = await group_name_for(db.operation_groups, update["group_id"])
+        update.update(group_id=gid, group_name=gname)
     before = await label_for(request, db.operations, operation_id, "name", "operation")
     note(request, before={k: before.get(k) for k in update} if before else None, after=update)
     await db.operations.update_one({"_id": ObjectId(operation_id)}, {"$set": update})
@@ -570,6 +586,7 @@ async def create_lot(data: LotCreate, request: Request):
             operators.append({"operator_id": op_id, "operator_name": operator["name"],
                               "operator_code": operator.get("operator_code", "")})
         operations.append({"operation_id": op_entry.operation_id, "operation_name": operation["name"],
+                           "group_name": operation.get("group_name", ""),
                            "rate": op_entry.rate, "operators": operators})
     doc = {
         "lot_number": lot_number, "style_name": data.style_name,
@@ -677,6 +694,7 @@ async def update_lot(lot_id: str, data: LotUpdate, request: Request):
                     operators.append({"operator_id": op_id, "operator_name": operator["name"],
                                       "operator_code": operator.get("operator_code", "")})
             operations.append({"operation_id": op_entry.operation_id, "operation_name": operation["name"],
+                               "group_name": operation.get("group_name", ""),
                                "rate": op_entry.rate, "operators": operators})
         dropped = ops_used - {o["operation_id"] for o in operations}
         if dropped:
@@ -894,6 +912,7 @@ async def create_production_batch(data: ProductionBatchCreate, request: Request)
     color_info = next((c for c in lot.get("colors", []) if c["name"] == data.color), None)
     if not color_info:
         raise HTTPException(400, "Color not found in this lot")
+    live_op = await db.operations.find_one({"_id": ObjectId(data.operation_id)})
     new_qty = {}
     for entry in data.entries:
         for sz, qty in entry.sizes.items():
@@ -929,6 +948,8 @@ async def create_production_batch(data: ProductionBatchCreate, request: Request)
             "lot_number": lot["lot_number"], "style_name": lot["style_name"],
             "operation_id": data.operation_id, "operation_name": op_info["operation_name"],
             "color": data.color, "rate": op_info["rate"],
+            "operation_group": live_op.get("group_name", "") if live_op else op_info.get("group_name", ""),
+            "operator_group": operator.get("group_name", ""),
             "operator_id": entry.operator_id, "operator_name": operator["name"],
             "operator_code": operator.get("operator_code", ""),
             "size_quantities": size_quantities, "total_quantity": total_qty,
@@ -1598,11 +1619,24 @@ async def get_dashboard(request: Request):
         operation_map[name]["total_earnings"] += entry.get("total_earnings", 0)
     for o in operation_map.values():
         o["total_earnings"] = round(o["total_earnings"], 2)
+
+    def by_group(field):
+        grouped = {}
+        for entry in week_entries:
+            name = entry.get(field) or "Ungrouped"
+            g = grouped.setdefault(name, {"name": name, "total_qty": 0, "total_earnings": 0.0})
+            g["total_qty"] += entry.get("total_quantity", 0)
+            g["total_earnings"] += entry.get("total_earnings", 0)
+        for g in grouped.values():
+            g["total_earnings"] = round(g["total_earnings"], 2)
+        return sorted(grouped.values(), key=lambda x: x["total_qty"], reverse=True)
+
     return {
         "active_lots": active_lots, "total_operators": total_operators,
         "week_production": week_production, "week_earnings": week_earnings,
         "week_number": wk, "year": yr, "lots": lot_data,
-        "top_operators": top_operators, "operation_stats": list(operation_map.values())
+        "top_operators": top_operators, "operation_stats": list(operation_map.values()),
+        "operation_group_stats": by_group("operation_group"), "operator_group_stats": by_group("operator_group")
     }
 
 # ===== REPORT & EXPORT ROUTES =====
@@ -1706,7 +1740,15 @@ async def report_weekly_production(week: int, year: int, request: Request):
         for o in rl["operations"].values():
             o["earnings"] = round(o["earnings"], 2)
         rl["operations"] = list(rl["operations"].values())
-    return {"week": week, "year": year, "lots": result_lots,
+    groups_map = {}
+    for e in entries:
+        g = groups_map.setdefault(e.get("operation_group") or "Ungrouped",
+                                  {"name": e.get("operation_group") or "Ungrouped", "qty": 0, "earnings": 0.0})
+        g["qty"] += e.get("total_quantity", 0)
+        g["earnings"] += e.get("total_earnings", 0)
+    for g in groups_map.values():
+        g["earnings"] = round(g["earnings"], 2)
+    return {"week": week, "year": year, "lots": result_lots, "by_group": list(groups_map.values()),
             "total_qty": sum(x["total_qty"] for x in result_lots),
             "total_earnings": round(sum(x["total_earnings"] for x in result_lots), 2)}
 
@@ -2103,7 +2145,7 @@ async def reset_all_data(request: Request):
     collections_to_clear = ["operators", "operations", "colors_master", "size_charts",
                             "weeks", "lots", "production_entries", "advances",
                             "notifications", "edit_requests", "counters", "system_settings", "login_attempts",
-                            "enquiries", "rate_limits", "approvals"]
+                            "enquiries", "rate_limits", "approvals", "operator_groups", "operation_groups"]
     note(request, entity_type="system", summary="ALL DATA RESET by admin (audit log is kept)")
     cleared = []
     for col in collections_to_clear:
@@ -2245,6 +2287,8 @@ async def startup():
     await db.audit_logs.create_index("action")
     await db.approvals.create_index([("status", 1), ("requested_at", -1)])
     await db.approvals.create_index("requested_by")
+    await db.operators.create_index("group_id")
+    await db.operations.create_index("group_id")
     await db.approvals.create_index("legacy_id", unique=True, sparse=True)
     await db.rate_limits.create_index("expires_at", expireAfterSeconds=0)
     await db.enquiries.create_index("created_at")
@@ -2278,6 +2322,7 @@ async def health():
 app.include_router(api_router)
 app.include_router(audit_router)
 app.include_router(approvals.router)
+app.include_router(groups_router)
 app.middleware("http")(audit_middleware)
 
 # ===== CORS =====
