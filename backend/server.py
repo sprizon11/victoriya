@@ -33,6 +33,8 @@ from groups import router as groups_router, group_name_for
 import ratetypes
 import stock
 import purchasing
+import lifecycle
+import mailer
 import expenses
 from purchasing import RequirementIn, build_requirements, clean_post_pct, lot_planned_total, generate_pos_for_lot
 from ratetypes import default_rate_type, get_rate_type
@@ -163,6 +165,7 @@ class LotCreate(BaseModel):
     quantity_control: Optional[dict] = None
     requirements: Optional[List[RequirementIn]] = None
     post_pct: float = 0                          # material wastage buffer added when ordering
+    order_rate: Optional[float] = None           # what the buyer pays per piece (optional; enables margin in costing)
 
 class LotUpdate(BaseModel):
     style_name: Optional[str] = None
@@ -175,6 +178,7 @@ class LotUpdate(BaseModel):
     quantity_control: Optional[dict] = None
     requirements: Optional[List[RequirementIn]] = None
     post_pct: Optional[float] = None
+    order_rate: Optional[float] = None
 
 class ProductionBatchEntry(BaseModel):
     operator_id: str
@@ -736,6 +740,11 @@ async def create_lot(data: LotCreate, request: Request):
     }
     post_pct = clean_post_pct(data.post_pct)
     doc["post_pct"] = post_pct
+    doc["fy"] = get_fy_suffix()
+    if data.order_rate is not None:
+        if not 0 < data.order_rate <= 1_000_000:
+            raise HTTPException(400, "Order rate must be a positive amount")
+        doc["order_rate"] = round(data.order_rate, 2)
     doc["requirements"] = await build_requirements(data.requirements or [], lot_planned_total(doc), post_pct)
     result = await db.lots.insert_one(doc)
     doc["id"] = str(result.inserted_id)
@@ -810,6 +819,10 @@ async def update_lot(lot_id: str, data: LotUpdate, request: Request):
         update["allowance_pct"] = allowance
     if data.quantity_control is not None:
         update["quantity_control"] = clean_quantity_control(data.quantity_control, prior.get("quantity_control"))
+    if data.order_rate is not None:
+        if not 0 <= data.order_rate <= 1_000_000:
+            raise HTTPException(400, "Order rate must be a positive amount")
+        update["order_rate"] = round(data.order_rate, 2) or None
 
     # the allowance may change on its own: rebuild the plan from the stored ORDER quantities
     quantities = data.color_size_quantities
@@ -917,16 +930,12 @@ async def close_lot(lot_id: str, request: Request):
     check_role(user, ["admin"])
     body = await request.json()
     reason = body.get("reason", "")
-    closing = await label_for(request, db.lots, lot_id, "lot_number", "lot")
-    note(request, summary=f"Closed lot {closing.get('lot_number','') if closing else ''}. {reason}".strip(),
-         after={"status": "completed", "reason": reason})
-    await db.lots.update_one({"_id": ObjectId(lot_id)}, {"$set": {
-        "status": "completed", "closed_by": user["id"], "closed_by_name": user.get("name", ""),
-        "closed_at": datetime.now(timezone.utc).isoformat(), "close_reason": reason
-    }})
-    await db.notifications.insert_one({"type": "lot_closed", "message": f"Lot closed by {user.get('name','')}",
-        "lot_id": lot_id, "created_at": datetime.now(timezone.utc).isoformat(), "read": False})
-    return {"message": "Lot closed"}
+    closure = await lifecycle.close_lot_with_report(request, user, lot_id, reason)
+    note(request, entity_type="lot", entity_id=lot_id, label=closure["lot_number"],
+         summary=f"Closed lot {closure['lot_number']} (report v{closure['version']}). {closure['reason']}".strip(),
+         after={"status": "completed", "reason": closure["reason"], "warnings": closure["acknowledged_warnings"]})
+    return {"message": "Lot closed", "closure_id": closure["id"], "version": closure["version"],
+            "acknowledged_warnings": closure["acknowledged_warnings"]}
 
 @api_router.post("/lots/{lot_id}/reopen")
 async def reopen_lot(lot_id: str, request: Request):
@@ -1339,6 +1348,7 @@ async def submit_enquiry(data: EnquiryCreate, request: Request):
     doc.update(created_at=now.isoformat(), ip=ip,
                user_agent=request.headers.get("user-agent", "")[:300], status="new")
     result = await db.enquiries.insert_one(doc)
+    await mailer.notify_enquiry(doc)          # best effort: a mail problem never fails the visitor's form
     await db.notifications.insert_one({"type": "enquiry", "enquiry_id": str(result.inserted_id),
         "audience": "admin", "message": "New website enquiry — open Enquiries to review.",
         "read": False, "created_at": now.isoformat()})
@@ -2448,7 +2458,7 @@ async def reset_all_data(request: Request):
                             "notifications", "edit_requests", "counters", "system_settings", "login_attempts",
                             "enquiries", "rate_limits", "approvals", "operator_groups", "operation_groups", "rate_types",
                             "stock_items", "suppliers", "stock_movements", "purchase_orders", "expense_categories", "expenses",
-                            "bills.files", "bills.chunks"]
+                            "bills.files", "bills.chunks", "lot_closures"]
     note(request, entity_type="system", summary="ALL DATA RESET by admin (audit log is kept)")
     cleared = []
     for col in collections_to_clear:
@@ -2599,6 +2609,9 @@ async def startup():
     await db.expenses.create_index([("date", -1)])
     await db.expenses.create_index([("vendor", 1), ("bill_no", 1)])
     await db.expenses.create_index("lot_id")
+    await db.lot_closures.create_index([("lot_id", 1), ("version", -1)])
+    await db.scheduler_state.create_index("report", unique=True)
+    await db.email_log.create_index([("at", -1)])
     await db.operators.create_index("group_id")
     await db.operations.create_index("group_id")
     await db.approvals.create_index("legacy_id", unique=True, sparse=True)
@@ -2638,7 +2651,10 @@ app.include_router(approvals.router)
 app.include_router(groups_router)
 app.include_router(ratetypes.router)
 app.include_router(stock.router)
+lifecycle.configure(enrich_lot)
 app.include_router(purchasing.router)
+app.include_router(lifecycle.router)
+app.include_router(mailer.router)
 app.include_router(expenses.router)
 app.middleware("http")(audit_middleware)
 

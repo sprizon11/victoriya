@@ -28,6 +28,20 @@ services:
       - key: JWT_SECRET
         generateValue: true    # random 256-bit value; rotating it logs everyone out
 
+      # ---- optional: email reports + scheduled jobs (see DEPLOY.md) ----
+      - key: CRON_TOKEN
+        generateValue: true    # the outside timer calls /api/jobs/run?token=<this value>
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+
       # ---- fixed config ----
       - key: DB_NAME
         value: victoria_unit_flow
