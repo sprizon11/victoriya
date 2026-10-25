@@ -112,8 +112,9 @@ async def create_request(request: Request, user: dict, type_: str, entity_id: st
     if not (await policies()).get(type_):
         raise HTTPException(400, f"Approval for '{POLICY_LABELS.get(type_, type_)}' is switched off. "
                                  "Ask an administrator to make the change directly.")
-    dup = await db.approvals.find_one({"type": type_, "entity_id": entity_id, "status": "pending",
-                                       "requested_by": user["id"]})
+    # a lot can legitimately have several different over-plan batches waiting at once
+    dup = None if type_ == "quantity_override" else await db.approvals.find_one(
+        {"type": type_, "entity_id": entity_id, "status": "pending", "requested_by": user["id"]})
     if dup:
         raise HTTPException(400, "You already have a pending request for this item")
     label, clean, snapshot = await handler["prepare"](user, entity_id, payload)

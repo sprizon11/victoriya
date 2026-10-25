@@ -30,6 +30,10 @@ from core import *  # noqa: F401,F403
 from audit import router as audit_router, audit_middleware, note, log_event
 import approvals
 from groups import router as groups_router, group_name_for
+import ratetypes
+from ratetypes import default_rate_type, get_rate_type
+from lotmath import (planned_from_order, compute_earnings, parse_money, clean_size_rates,
+                     lot_op_rates, find_rate, average_rate)
 from approvals import ApprovalExpired, record_auto
 
 
@@ -130,10 +134,18 @@ class LotColorEntry(BaseModel):
     name: str
     sizes: List[SizeEntry]
 
+class ExtraRate(BaseModel):
+    rate_type_id: str
+    rate: float
+    size_rates: Optional[dict] = None
+
+
 class LotOperationEntry(BaseModel):
     operation_id: str
-    rate: float
+    rate: float                                  # the default (Regular) flat rate
     operator_ids: List[str]
+    size_rates: Optional[dict] = None            # default type: {size: rate} overrides
+    extra_rates: List[ExtraRate] = []            # other rate types (Sample, Rework, ...)
 
 class LotCreate(BaseModel):
     style_name: str
@@ -141,8 +153,10 @@ class LotCreate(BaseModel):
     target_end_date: str
     size_chart_id: str
     color_names: List[str]
-    color_size_quantities: dict
+    color_size_quantities: dict                  # ORDERED quantities; planned = order + allowance
     operations: List[LotOperationEntry]
+    allowance_pct: float = 0
+    quantity_control: Optional[dict] = None
 
 class LotUpdate(BaseModel):
     style_name: Optional[str] = None
@@ -151,6 +165,8 @@ class LotUpdate(BaseModel):
     status: Optional[str] = None
     color_size_quantities: Optional[dict] = None
     operations: Optional[List[LotOperationEntry]] = None
+    allowance_pct: Optional[float] = None
+    quantity_control: Optional[dict] = None
 
 class ProductionBatchEntry(BaseModel):
     operator_id: str
@@ -163,6 +179,7 @@ class ProductionBatchCreate(BaseModel):
     color: str
     date: str
     entries: List[ProductionBatchEntry]
+    rate_type_id: Optional[str] = None
 
 class SettingUpdate(BaseModel):
     value: str
@@ -484,6 +501,98 @@ async def delete_week(week_id: str, request: Request):
 
 # ===== LOT ROUTES =====
 
+def clean_allowance(value) -> float:
+    try:
+        pct = float(value or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Allowance must be a number")
+    if pct < 0 or pct > 50:
+        raise HTTPException(400, "Allowance must be between 0% and 50%")
+    return round(pct, 2)
+
+
+def clean_quantity_control(raw, previous=None):
+    """over_tolerance_pct: extra beyond plan that needs approval (0 = strict).
+    warn_at_pct: when the entry grid starts warning. locked: {"Colour|Size": True}."""
+    base = {"over_tolerance_pct": 0.0, "warn_at_pct": 90.0, "locked": {}}
+    qc = {**base, **(previous or {})}
+    if raw is None:
+        return qc
+    try:
+        if "over_tolerance_pct" in raw:
+            qc["over_tolerance_pct"] = round(float(raw["over_tolerance_pct"] or 0), 2)
+        if "warn_at_pct" in raw:
+            qc["warn_at_pct"] = round(float(raw["warn_at_pct"] or 90), 2)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Quantity control values must be numbers")
+    if not 0 <= qc["over_tolerance_pct"] <= 50:
+        raise HTTPException(400, "Over-production tolerance must be between 0% and 50%")
+    if not 1 <= qc["warn_at_pct"] <= 100:
+        raise HTTPException(400, "Warning level must be between 1% and 100%")
+    if "locked" in raw:
+        qc["locked"] = {str(k): True for k, v in (raw.get("locked") or {}).items() if v}
+    return qc
+
+
+def build_lot_colors(color_names, quantities, sizes, allowance_pct, old_colors=None):
+    """Each cell keeps what was ORDERED and what is PLANNED (order + allowance,
+    rounded half-up per cell). `planned_qty` is the number every production
+    control already uses, so none of them had to change."""
+    old = {c["name"]: c for c in (old_colors or [])}
+    colors = []
+    for cname in color_names:
+        cell = (quantities or {}).get(cname, {}) or {}
+        entries = []
+        for sz in sizes:
+            order = plan_qty(cell.get(sz, 0))
+            entries.append({"size": sz, "order_qty": order, "planned_qty": planned_from_order(order, allowance_pct)})
+        # keep the id of a colour that already exists; it used to be regenerated on every save
+        colors.append({"color_id": (old.get(cname) or {}).get("color_id") or str(uuid.uuid4()),
+                       "name": cname, "sizes": entries})
+    return colors
+
+
+async def build_lot_operations(op_entries, sizes, strict_operators=True):
+    """Operations with their operators and rate card. The default rate type's flat
+    rate stays on `rate` (what every older reader expects); the full card, including
+    per-size overrides and other rate types, lives in `rates`."""
+    default = await default_rate_type()
+    operations = []
+    for op_entry in op_entries:
+        if not ObjectId.is_valid(op_entry.operation_id):
+            raise HTTPException(400, "Operation not found")
+        operation = await db.operations.find_one({"_id": ObjectId(op_entry.operation_id)})
+        if not operation:
+            raise HTTPException(400, f"Operation {op_entry.operation_id} not found")
+        operators = []
+        for op_id in op_entry.operator_ids:
+            operator = await db.operators.find_one({"_id": ObjectId(op_id)}) if ObjectId.is_valid(op_id) else None
+            if not operator:
+                if strict_operators:
+                    raise HTTPException(400, f"Operator {op_id} not found")
+                continue
+            operators.append({"operator_id": op_id, "operator_name": operator["name"],
+                              "operator_code": operator.get("operator_code", "")})
+        try:
+            flat = parse_money(op_entry.rate)
+            srates = clean_size_rates(op_entry.size_rates, sizes)
+            rows = [{"rate_type_id": default["id"], "rate_type_name": default["name"], "rate": flat, "size_rates": srates}]
+            seen = {default["id"]}
+            for extra in op_entry.extra_rates:
+                if extra.rate_type_id in seen:
+                    raise ValueError("Each rate type can only be set once per operation")
+                rt = await get_rate_type(extra.rate_type_id)
+                seen.add(rt["id"])
+                rows.append({"rate_type_id": rt["id"], "rate_type_name": rt["name"],
+                             "rate": parse_money(extra.rate), "size_rates": clean_size_rates(extra.size_rates, sizes)})
+        except ValueError as exc:
+            raise HTTPException(400, f"{operation['name']}: {exc}")
+        operations.append({"operation_id": op_entry.operation_id, "operation_name": operation["name"],
+                           "group_name": operation.get("group_name", ""),
+                           "rate": flat, "size_rates": srates, "rates": rows, "operators": operators})
+    return operations
+
+
 async def enrich_lot(lot):
     """Attach planned/produced/progress figures to a lot.
 
@@ -496,21 +605,39 @@ async def enrich_lot(lot):
     per-operation figures are returned alongside so the UI can show where the
     bottleneck is.
     """
-    total_planned = 0
+    total_planned = total_order = 0
     for color in lot.get("colors", []):
         color_total = sum(s.get("planned_qty", 0) for s in color.get("sizes", []))
+        color_order = sum(s.get("order_qty", s.get("planned_qty", 0)) for s in color.get("sizes", []))
         color["total"] = color_total
+        color["total_order"] = color_order
         total_planned += color_total
+        total_order += color_order
     lot["total_planned_qty"] = total_planned
+    lot["total_order_qty"] = total_order                 # old lots: order == planned
+    lot["allowance_pct"] = lot.get("allowance_pct", 0)
+    lot["allowance_qty"] = total_planned - total_order
+    lot["quantity_control"] = clean_quantity_control(None, lot.get("quantity_control"))
 
     lot_id = lot.get("id", "")
+    # pieces only count as produced when the rate type counts toward the plan;
+    # sample/rework are paid but are not new finished pieces
     pipeline = [
         {"$match": {"lot_id": lot_id}},
-        {"$group": {"_id": "$operation_id", "total": {"$sum": "$total_quantity"},
-                    "earnings": {"$sum": "$total_earnings"}}},
+        {"$group": {"_id": {"op": "$operation_id", "plan": {"$ne": ["$counts_toward_plan", False]}},
+                    "total": {"$sum": "$total_quantity"}, "earnings": {"$sum": "$total_earnings"}}},
     ]
-    agg = await db.production_entries.aggregate(pipeline).to_list(200)
-    by_operation = {a["_id"]: a for a in agg}
+    agg = await db.production_entries.aggregate(pipeline).to_list(500)
+    by_operation, non_plan_qty, non_plan_cost = {}, 0, 0.0
+    for a in agg:
+        op_id = a["_id"]["op"]
+        slot = by_operation.setdefault(op_id, {"total": 0, "earnings": 0.0})
+        slot["earnings"] += a["earnings"]
+        if a["_id"]["plan"]:
+            slot["total"] += a["total"]
+        else:
+            non_plan_qty += a["total"]
+            non_plan_cost += a["earnings"]
 
     lot_operations = lot.get("operations", [])
     op_progress = []
@@ -540,6 +667,8 @@ async def enrich_lot(lot):
     # total pieces handled across every operation - useful, but not "produced"
     lot["total_operation_qty"] = sum(o["produced_qty"] for o in op_progress)
     lot["total_labour_cost"] = round(sum(o["cost"] for o in op_progress), 2)
+    lot["non_plan_qty"] = non_plan_qty
+    lot["non_plan_cost"] = round(non_plan_cost, 2)
     return lot
 
 @api_router.get("/lots")
@@ -565,34 +694,15 @@ async def create_lot(data: LotCreate, request: Request):
     if not size_chart:
         raise HTTPException(400, "Size chart not found")
     sizes = size_chart["sizes"]
-    colors = []
-    for cname in data.color_names:
-        color_data = data.color_size_quantities.get(cname, {})
-        size_entries = []
-        for sz in sizes:
-            qty = plan_qty(color_data.get(sz, 0))
-            size_entries.append({"size": sz, "planned_qty": qty})
-        colors.append({"color_id": str(uuid.uuid4()), "name": cname, "sizes": size_entries})
-    operations = []
-    for op_entry in data.operations:
-        operation = await db.operations.find_one({"_id": ObjectId(op_entry.operation_id)})
-        if not operation:
-            raise HTTPException(400, f"Operation {op_entry.operation_id} not found")
-        operators = []
-        for op_id in op_entry.operator_ids:
-            operator = await db.operators.find_one({"_id": ObjectId(op_id)})
-            if not operator:
-                raise HTTPException(400, f"Operator {op_id} not found")
-            operators.append({"operator_id": op_id, "operator_name": operator["name"],
-                              "operator_code": operator.get("operator_code", "")})
-        operations.append({"operation_id": op_entry.operation_id, "operation_name": operation["name"],
-                           "group_name": operation.get("group_name", ""),
-                           "rate": op_entry.rate, "operators": operators})
+    allowance = clean_allowance(data.allowance_pct)
+    colors = build_lot_colors(data.color_names, data.color_size_quantities, sizes, allowance)
+    operations = await build_lot_operations(data.operations, sizes)
     doc = {
         "lot_number": lot_number, "style_name": data.style_name,
         "start_date": data.start_date, "target_end_date": data.target_end_date,
         "status": "active", "size_chart_id": data.size_chart_id,
         "size_chart_name": size_chart["name"], "sizes": sizes,
+        "allowance_pct": allowance, "quantity_control": clean_quantity_control(data.quantity_control),
         "colors": colors, "operations": operations,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
@@ -657,22 +767,27 @@ async def update_lot(lot_id: str, data: LotUpdate, request: Request):
 
     produced_cell, ops_used = await produced_by_cell(lot_id)
     has_production = bool(ops_used)
+    sizes = prior.get("sizes", [])
 
-    if data.color_size_quantities is not None:
-        sizes = prior.get("sizes", [])
-        old_colors = {c["name"]: c for c in prior.get("colors", [])}
-        colors, problems = [], []
-        for cname, size_data in data.color_size_quantities.items():
-            size_entries = []
-            for sz in sizes:
-                qty = plan_qty((size_data or {}).get(sz, 0))
-                done = produced_cell.get((cname, sz), 0)
-                if qty < done:
-                    problems.append(f"{cname} {sz}: plan {qty} is below the {done} already produced")
-                size_entries.append({"size": sz, "planned_qty": qty})
-            # keep the id of a colour that already exists; it used to be regenerated on every save
-            color_id = (old_colors.get(cname) or {}).get("color_id") or str(uuid.uuid4())
-            colors.append({"color_id": color_id, "name": cname, "sizes": size_entries})
+    allowance = clean_allowance(data.allowance_pct) if data.allowance_pct is not None else prior.get("allowance_pct", 0)
+    if data.allowance_pct is not None:
+        update["allowance_pct"] = allowance
+    if data.quantity_control is not None:
+        update["quantity_control"] = clean_quantity_control(data.quantity_control, prior.get("quantity_control"))
+
+    # the allowance may change on its own: rebuild the plan from the stored ORDER quantities
+    quantities = data.color_size_quantities
+    if quantities is None and data.allowance_pct is not None:
+        quantities = {c["name"]: {s["size"]: s.get("order_qty", s["planned_qty"]) for s in c.get("sizes", [])}
+                      for c in prior.get("colors", [])}
+    if quantities is not None:
+        colors = build_lot_colors(list(quantities.keys()), quantities, sizes, allowance, prior.get("colors"))
+        problems = []
+        for c in colors:
+            for sz in c["sizes"]:
+                done = produced_cell.get((c["name"], sz["size"]), 0)
+                if sz["planned_qty"] < done:
+                    problems.append(f"{c['name']} {sz['size']}: plan {sz['planned_qty']} is below the {done} already produced")
         kept = {c["name"] for c in colors}
         for (cname, _sz), done in produced_cell.items():
             if cname not in kept and done > 0:
@@ -682,20 +797,7 @@ async def update_lot(lot_id: str, data: LotUpdate, request: Request):
         update["colors"] = colors
 
     if data.operations is not None:
-        operations = []
-        for op_entry in data.operations:
-            operation = await db.operations.find_one({"_id": ObjectId(op_entry.operation_id)})
-            if not operation:
-                raise HTTPException(400, "Operation not found")
-            operators = []
-            for op_id in op_entry.operator_ids:
-                operator = await db.operators.find_one({"_id": ObjectId(op_id)})
-                if operator:
-                    operators.append({"operator_id": op_id, "operator_name": operator["name"],
-                                      "operator_code": operator.get("operator_code", "")})
-            operations.append({"operation_id": op_entry.operation_id, "operation_name": operation["name"],
-                               "group_name": operation.get("group_name", ""),
-                               "rate": op_entry.rate, "operators": operators})
+        operations = await build_lot_operations(data.operations, sizes, strict_operators=False)
         dropped = ops_used - {o["operation_id"] for o in operations}
         if dropped:
             names = [o.get("operation_name") for o in prior.get("operations", []) if o["operation_id"] in dropped]
@@ -708,8 +810,11 @@ async def update_lot(lot_id: str, data: LotUpdate, request: Request):
     # what actually changed, so the approval record and the log say something useful
     def plan_view(cols):
         return {c["name"]: {s["size"]: s["planned_qty"] for s in c.get("sizes", [])} for c in cols or []}
+    default = await default_rate_type()
+
     def rate_view(ops):
-        return {o.get("operation_name", ""): o.get("rate") for o in ops or []}
+        return {o.get("operation_name", ""): [(r.get("rate_type_id"), r.get("rate"), r.get("size_rates") or {})
+                                              for r in lot_op_rates(o, default)] for o in ops or []}
     plan_changed = "colors" in update and plan_view(update["colors"]) != plan_view(prior.get("colors"))
     rates_changed = "operations" in update and rate_view(update["operations"]) != rate_view(prior.get("operations"))
     operators_changed = "operations" in update and (
@@ -734,10 +839,11 @@ async def update_lot(lot_id: str, data: LotUpdate, request: Request):
                 before={"plan": plan_view(prior.get("colors"))} if plan_changed else None,
                 after={"plan": plan_view(update["colors"])} if plan_changed else None) or approval_id
 
+    simple = ("style_name", "start_date", "target_end_date", "status", "allowance_pct", "quantity_control")
     note(request, entity_type="lot", entity_id=lot_id, label=label, approval_id=approval_id,
          summary=f"Updated lot {label}: " + ", ".join(update.keys()),
-         before={k: prior.get(k) for k in update if k in ("style_name", "start_date", "target_end_date", "status")} or None,
-         after={k: v for k, v in update.items() if k in ("style_name", "start_date", "target_end_date", "status")} or None)
+         before={k: prior.get(k) for k in update if k in simple} or None,
+         after={k: v for k, v in update.items() if k in simple} or None)
     lot = serialize_doc(lot)
     return await enrich_lot(lot)
 
@@ -820,17 +926,19 @@ async def get_production(request: Request, lot_id: Optional[str] = None, week_id
     result = [serialize_doc(e) for e in entries]
     if user.get("role") == "data_entry":
         for e in result:
-            e.pop("rate", None)
-            e.pop("total_earnings", None)
+            for money_field in ("rate", "rate_flat", "size_rates", "total_earnings"):
+                e.pop(money_field, None)
     return result
 
 @api_router.get("/production/tracking/{lot_id}")
 async def get_lot_tracking(lot_id: str, request: Request, operation_id: Optional[str] = None):
     await get_current_user(request)
+    if not ObjectId.is_valid(lot_id):
+        raise HTTPException(404, "Lot not found")
     lot = await db.lots.find_one({"_id": ObjectId(lot_id)})
     if not lot:
         raise HTTPException(404, "Lot not found")
-    query = {"lot_id": lot_id}
+    query = {"lot_id": lot_id, "counts_toward_plan": {"$ne": False}}
     if operation_id:
         query["operation_id"] = operation_id
     entries = await db.production_entries.find(query).to_list(10000)
@@ -841,37 +949,52 @@ async def get_lot_tracking(lot_id: str, request: Request, operation_id: Optional
             produced[color] = {}
         for size, qty in e.get("size_quantities", {}).items():
             produced[color][size] = produced[color].get(size, 0) + qty
+    qc = clean_quantity_control(None, lot.get("quantity_control"))
+    tolerance = qc["over_tolerance_pct"]
     tracking = []
     for color in lot.get("colors", []):
         ct = {"name": color["name"], "sizes": [], "total_planned": 0, "total_produced": 0}
         for size in color.get("sizes", []):
             planned = size["planned_qty"]
             prod = produced.get(color["name"], {}).get(size["size"], 0)
-            ct["sizes"].append({"size": size["size"], "planned": planned, "produced": prod, "balance": planned - prod})
+            ct["sizes"].append({"size": size["size"], "planned": planned, "produced": prod, "balance": planned - prod,
+                                "locked": bool(qc["locked"].get(f"{color['name']}|{size['size']}")),
+                                "max_with_tolerance": planned_from_order(planned, tolerance),
+                                "warn": planned > 0 and prod * 100 >= planned * qc["warn_at_pct"]})
             ct["total_planned"] += planned
             ct["total_produced"] += prod
         ct["balance"] = ct["total_planned"] - ct["total_produced"]
         tracking.append(ct)
     return tracking
 
-async def assert_within_plan(lot, color, operation_id, add_qty, exclude_entry_id=None):
+async def assert_within_plan(lot, color, operation_id, add_qty, exclude_entry_id=None, allow_override=False):
     """Reject quantities that would take a lot/colour/operation past its plan.
 
     This is the control that stops payroll inflation at source. It is called from
-    both the batch-entry route and the edit route -- editing an entry used to
-    skip it entirely, which made the whole guard bypassable.
+    the batch-entry route, the edit route and approval apply -- editing an entry
+    used to skip it entirely, which made the whole guard bypassable.
 
     `add_qty` is {size: qty} being proposed. `exclude_entry_id` omits the entry
     being edited from the existing totals, so an edit is measured against its
-    replacement rather than counted twice.
+    replacement rather than counted twice. Only pieces whose rate type counts
+    toward the plan are measured (sample/rework are paid but not new pieces).
+
+    A lot may allow a small over-production tolerance, but only with approval:
+    inside the tolerance this raises 409 {code: needs_approval}; with
+    `allow_override` (an approved request) it passes; beyond it, always 400.
     """
     color_info = next((c for c in lot.get("colors", []) if c["name"] == color), None)
     if not color_info:
         raise HTTPException(400, "Color not found in this lot")
     planned_qty = {s["size"]: s["planned_qty"] for s in color_info.get("sizes", [])}
+    qc = clean_quantity_control(None, lot.get("quantity_control"))
+
+    locked = [sz for sz, qty in add_qty.items() if qty > 0 and qc["locked"].get(f"{color}|{sz}")]
+    if locked:
+        raise HTTPException(400, f"{color} {', '.join(locked)} is locked by the administrator. No more entries can be recorded.")
 
     query = {"lot_id": str(lot["_id"]) if "_id" in lot else lot.get("id", ""),
-             "color": color, "operation_id": operation_id}
+             "color": color, "operation_id": operation_id, "counts_toward_plan": {"$ne": False}}
     if exclude_entry_id:
         query["_id"] = {"$ne": ObjectId(exclude_entry_id)}
     existing = await db.production_entries.find(query).to_list(10000)
@@ -881,29 +1004,49 @@ async def assert_within_plan(lot, color, operation_id, add_qty, exclude_entry_id
         for sz, qty in e.get("size_quantities", {}).items():
             existing_qty[sz] = existing_qty.get(sz, 0) + qty
 
-    errors = []
+    errors, needs_approval, excess = [], [], {}
     for sz, qty in add_qty.items():
         if qty <= 0:
             continue
         total = existing_qty.get(sz, 0) + qty
         planned = planned_qty.get(sz, 0)
         if total > planned:
-            errors.append(f"{sz}: {total}/{planned} exceeds planned")
+            ceiling = planned_from_order(planned, qc["over_tolerance_pct"])
+            msg = f"{sz}: {total}/{planned} exceeds planned"
+            if qc["over_tolerance_pct"] > 0 and total <= ceiling:
+                needs_approval.append(msg)
+                excess[sz] = total - planned
+            else:
+                errors.append(msg)
     if errors:
         raise HTTPException(400, f"Quantity exceeds planned limit: {'; '.join(errors)}")
+    if needs_approval and not allow_override:
+        raise HTTPException(409, detail={
+            "code": "needs_approval", "excess": excess,
+            "message": f"Over the plan but within the {qc['over_tolerance_pct']}% tolerance: "
+                       f"{'; '.join(needs_approval)}. An administrator must approve the extra pieces."})
 
 
-@api_router.post("/production/batch")
-async def create_production_batch(data: ProductionBatchCreate, request: Request):
-    user = await get_current_user(request)
-    check_role(user, ["admin", "data_entry"])
-    check_permission(user, "can_enter")
-    lot = await db.lots.find_one({"_id": ObjectId(data.lot_id)})
+def entry_rate_card(entry):
+    """(flat, {size: rate}) recorded on an entry. Entries written before per-size
+    rates only have `rate`."""
+    return entry.get("rate_flat", entry.get("rate", 0)), entry.get("size_rates") or {}
+
+
+def entry_money(entry, size_quantities):
+    """(pieces, money) for a changed set of quantities, from the entry's own rate
+    snapshot so editing a lot's rate card later never reprices old entries."""
+    flat, size_rates = entry_rate_card(entry)
+    return compute_earnings(size_quantities, flat, size_rates)
+
+
+async def run_batch(data: ProductionBatchCreate, user: dict, allow_override=False, dry_run=False):
+    lot = await db.lots.find_one({"_id": ObjectId(data.lot_id)}) if ObjectId.is_valid(data.lot_id) else None
     if not lot:
         raise HTTPException(400, "Lot not found")
     if lot.get("status") == "completed":
         raise HTTPException(400, "This lot is closed. No further production entry allowed.")
-    week = await db.weeks.find_one({"_id": ObjectId(data.week_id)})
+    week = await db.weeks.find_one({"_id": ObjectId(data.week_id)}) if ObjectId.is_valid(data.week_id) else None
     if not week:
         raise HTTPException(400, "Week not found")
     op_info = next((op for op in lot.get("operations", []) if op["operation_id"] == data.operation_id), None)
@@ -912,18 +1055,48 @@ async def create_production_batch(data: ProductionBatchCreate, request: Request)
     color_info = next((c for c in lot.get("colors", []) if c["name"] == data.color), None)
     if not color_info:
         raise HTTPException(400, "Color not found in this lot")
+
+    default_type = await default_rate_type()
+    rate_type = await get_rate_type(data.rate_type_id) if data.rate_type_id else default_type
+    card = find_rate(op_info, rate_type["id"], default_type)
+    if card is None:
+        raise HTTPException(400, f"No {rate_type['name']} rate has been set for {op_info['operation_name']} on this lot")
+    flat_rate, size_rates = card
+    counts = rate_type.get("counts_toward_plan", True)
+    is_default = rate_type["id"] == default_type["id"]
+
     live_op = await db.operations.find_one({"_id": ObjectId(data.operation_id)})
     new_qty = {}
     for entry in data.entries:
         for sz, qty in entry.sizes.items():
             q = int(qty) if qty else 0
+            if q < 0:
+                raise HTTPException(400, "Quantities cannot be negative")
             if q > 0:
                 new_qty[sz] = new_qty.get(sz, 0) + q
-    await assert_within_plan(lot, data.color, data.operation_id, new_qty)
-    dup_warnings = []
-    saved = []
+    if counts:
+        await assert_within_plan(lot, data.color, data.operation_id, new_qty, allow_override=allow_override)
+    else:
+        # paid but not planned: capped per lot and operation when the owner has set a cap
+        planned_total = sum(s["planned_qty"] for c in lot.get("colors", []) for s in c.get("sizes", []))
+        cap = None
+        if rate_type.get("cap_pieces") is not None:
+            cap = rate_type["cap_pieces"]
+        if rate_type.get("cap_pct_of_plan") is not None:
+            pct_cap = planned_from_order(planned_total, 0) * rate_type["cap_pct_of_plan"] / 100
+            cap = pct_cap if cap is None else min(cap, pct_cap)
+        if cap is not None:
+            already = 0
+            async for e in db.production_entries.find({"lot_id": data.lot_id, "operation_id": data.operation_id,
+                                                       "rate_type_id": rate_type["id"]}, {"total_quantity": 1}):
+                already += e.get("total_quantity", 0)
+            if already + sum(new_qty.values()) > cap:
+                raise HTTPException(400, f"{rate_type['name']} pieces for this operation are capped at {int(cap)} "
+                                         f"({already} already recorded).")
+
+    dup_warnings, saved = [], []
     for entry in data.entries:
-        operator = await db.operators.find_one({"_id": ObjectId(entry.operator_id)})
+        operator = await db.operators.find_one({"_id": ObjectId(entry.operator_id)}) if ObjectId.is_valid(entry.operator_id) else None
         if not operator:
             continue
         size_quantities = {k: int(v) for k, v in entry.sizes.items() if int(v or 0) > 0}
@@ -931,39 +1104,78 @@ async def create_production_batch(data: ProductionBatchCreate, request: Request)
         if total_qty == 0:
             continue
         # Duplicate = the SAME operator, on the SAME day, for the same
-        # lot/operation/colour. `date` used to be missing from this key, which
-        # meant only the first day of each week could ever be saved - every
-        # later day was silently discarded and the operator was underpaid.
-        existing_dup = await db.production_entries.find_one({
-            "week_id": data.week_id, "lot_id": data.lot_id, "operation_id": data.operation_id,
-            "color": data.color, "operator_id": entry.operator_id, "date": data.date
-        })
-        if existing_dup:
+        # lot/operation/colour/rate type. `date` used to be missing from this key,
+        # which meant only the first day of each week could ever be saved.
+        # Entries from before rate types existed have no rate_type_id: they are Regular.
+        dup_query = {"week_id": data.week_id, "lot_id": data.lot_id, "operation_id": data.operation_id,
+                     "color": data.color, "operator_id": entry.operator_id, "date": data.date,
+                     "rate_type_id": {"$in": [rate_type["id"], None]} if is_default else rate_type["id"]}
+        if await db.production_entries.find_one(dup_query):
             dup_warnings.append(
                 f"{operator['name']} ({operator.get('operator_code','')}) already has an entry for {data.date}")
             continue
+        qty_done, money = compute_earnings(size_quantities, flat_rate, size_rates)
         doc = {
             "week_id": data.week_id, "week_number": week.get("week_number"),
             "year": week.get("year"), "lot_id": data.lot_id,
             "lot_number": lot["lot_number"], "style_name": lot["style_name"],
             "operation_id": data.operation_id, "operation_name": op_info["operation_name"],
-            "color": data.color, "rate": op_info["rate"],
+            "color": data.color,
+            "rate": flat_rate if not size_rates else average_rate(size_quantities, flat_rate, size_rates),
+            "rate_flat": flat_rate, "size_rates": size_rates,
+            "rate_type_id": rate_type["id"], "rate_type_name": rate_type["name"], "counts_toward_plan": counts,
             "operation_group": live_op.get("group_name", "") if live_op else op_info.get("group_name", ""),
             "operator_group": operator.get("group_name", ""),
             "operator_id": entry.operator_id, "operator_name": operator["name"],
             "operator_code": operator.get("operator_code", ""),
-            "size_quantities": size_quantities, "total_quantity": total_qty,
-            "total_earnings": round(total_qty * op_info["rate"], 2),
+            "size_quantities": size_quantities, "total_quantity": qty_done,
+            "total_earnings": money,
             "date": data.date, "entered_by": user["id"],
             "entered_by_name": user.get("name", ""),
             "created_at": datetime.now(timezone.utc).isoformat()
         }
+        if dry_run:
+            saved.append(doc)
+            continue
         result = await db.production_entries.insert_one(doc)
         doc["id"] = str(result.inserted_id)
         doc.pop("_id", None)
         saved.append(doc)
+
+    if saved and not counts and not dry_run:
+        await _maybe_alert_non_plan(lot, data.lot_id)
+    return lot, op_info, saved, dup_warnings, rate_type
+
+
+async def _maybe_alert_non_plan(lot, lot_id):
+    """Sample/rework pay is a payroll-inflation path, so tell admins when it gets large."""
+    setting = await db.system_settings.find_one({"key": "non_plan_alert_pct"})
+    try:
+        limit = float(setting["value"]) if setting else 5.0
+    except (TypeError, ValueError, KeyError):
+        limit = 5.0
+    planned_total = sum(s["planned_qty"] for c in lot.get("colors", []) for s in c.get("sizes", []))
+    if planned_total <= 0:
+        return
+    total = 0
+    async for e in db.production_entries.find({"lot_id": lot_id, "counts_toward_plan": False}, {"total_quantity": 1}):
+        total += e.get("total_quantity", 0)
+    if total * 100 > planned_total * limit:
+        if not await db.notifications.find_one({"type": "non_plan_alert", "lot_id": lot_id, "read": False}):
+            await db.notifications.insert_one({
+                "type": "non_plan_alert", "lot_id": lot_id, "audience": "admin", "read": False,
+                "message": f"{lot['lot_number']}: sample/rework pieces ({total}) are over {limit:g}% of the plan",
+                "created_at": datetime.now(timezone.utc).isoformat()})
+
+
+@api_router.post("/production/batch")
+async def create_production_batch(data: ProductionBatchCreate, request: Request):
+    user = await get_current_user(request)
+    check_role(user, ["admin", "data_entry"])
+    check_permission(user, "can_enter")
+    lot, op_info, saved, dup_warnings, rate_type = await run_batch(data, user)
     note(request, entity_type="production", entity_id=data.lot_id, label=f"{lot['lot_number']} {op_info['operation_name']} {data.color}",
-         summary=f"Saved {len(saved)} production entries ({sum(e['total_quantity'] for e in saved)} pcs) for {data.date}",
+         summary=f"Saved {len(saved)} production entries ({sum(e['total_quantity'] for e in saved)} pcs, {rate_type['name']}) for {data.date}",
          after={"entries": [{"operator": e["operator_name"], "qty": e["total_quantity"], "earnings": e["total_earnings"]} for e in saved],
                 "duplicates_skipped": dup_warnings})
     return {"saved": len(saved), "entries": saved, "duplicates_skipped": dup_warnings}
@@ -1009,11 +1221,11 @@ async def edit_production(entry_id: str, request: Request):
         raise HTTPException(400, "This lot is closed. Reopen it before editing entries.")
     # the edit route previously skipped this entirely, so the over-production
     # guard could be walked straight past by editing instead of adding
-    await assert_within_plan(lot, entry.get("color", ""), entry.get("operation_id", ""),
-                             new_sq, exclude_entry_id=entry_id)
+    if entry.get("counts_toward_plan", True):
+        await assert_within_plan(lot, entry.get("color", ""), entry.get("operation_id", ""),
+                                 new_sq, exclude_entry_id=entry_id)
 
-    new_total = sum(new_sq.values())
-    new_earnings = round(new_total * entry.get("rate", 0), 2)
+    new_total, new_earnings = entry_money(entry, new_sq)
     audit = {"edited_by": user["id"], "edited_by_name": user.get("name", ""),
              "edited_at": datetime.now(timezone.utc).isoformat(),
              "reason": body.get("reason", ""),
@@ -1160,7 +1372,8 @@ async def prepare_production_edit(user, entry_id, payload):
         raise HTTPException(400, "The lot for this entry no longer exists")
     if lot.get("status") == "completed":
         raise HTTPException(400, "This lot is closed. An administrator must reopen it before entries can change.")
-    await assert_within_plan(lot, entry.get("color", ""), entry.get("operation_id", ""), new_sq, exclude_entry_id=entry_id)
+    if entry.get("counts_toward_plan", True):
+        await assert_within_plan(lot, entry.get("color", ""), entry.get("operation_id", ""), new_sq, exclude_entry_id=entry_id)
     return _entry_label(entry), {"size_quantities": new_sq}, _entry_snapshot(entry)
 
 
@@ -1181,10 +1394,10 @@ async def apply_production_edit(approval, reviewer, request):
         raise HTTPException(400, "The lot for this entry no longer exists")
     if lot.get("status") == "completed":
         raise HTTPException(400, "This lot is closed. Reopen it before approving.")
-    await assert_within_plan(lot, entry.get("color", ""), entry.get("operation_id", ""), new_sq,
-                             exclude_entry_id=approval["entity_id"])
-    new_total = sum(new_sq.values())
-    new_earnings = round(new_total * entry.get("rate", 0), 2)      # money always recomputed here
+    if entry.get("counts_toward_plan", True):
+        await assert_within_plan(lot, entry.get("color", ""), entry.get("operation_id", ""), new_sq,
+                                 exclude_entry_id=approval["entity_id"])
+    new_total, new_earnings = entry_money(entry, new_sq)           # money always recomputed here, from the entry's own rate card
     now = datetime.now(timezone.utc).isoformat()
     before = {"size_quantities": entry.get("size_quantities", {}), "total_quantity": entry.get("total_quantity", 0)}
     after = {"size_quantities": new_sq, "total_quantity": new_total}
@@ -1217,6 +1430,35 @@ async def apply_production_delete(approval, reviewer, request):
 
 approvals.register("production_edit", prepare=prepare_production_edit, apply=apply_production_edit)
 approvals.register("production_delete", prepare=prepare_production_delete, apply=apply_production_delete)
+
+
+async def prepare_quantity_override(user, lot_id, payload):
+    """The request carries the whole batch. Validate it now exactly as saving would,
+    pretending the tolerance has been granted, so a request that could never be
+    applied is refused up front."""
+    try:
+        batch = ProductionBatchCreate(**{**(payload or {}), "lot_id": lot_id})
+    except Exception:
+        raise HTTPException(400, "The request does not contain a valid production batch")
+    lot, op_info, saved, dups, rt = await run_batch(batch, user, allow_override=True, dry_run=True)
+    if not saved:
+        raise HTTPException(400, "Nothing to save in this batch")
+    label = f"{lot['lot_number']} · {op_info['operation_name']} · {batch.color} · {batch.date}"
+    snapshot = {"pieces": sum(e["total_quantity"] for e in saved), "operators": [e["operator_name"] for e in saved]}
+    return label, batch.model_dump(), snapshot
+
+
+async def apply_quantity_override(approval, reviewer, request):
+    batch = ProductionBatchCreate(**approval["payload"])
+    # attributed to whoever asked for it, not to the approver
+    requester = {"id": approval["requested_by"], "name": approval.get("requested_by_name", "")}
+    lot, op_info, saved, dups, rt = await run_batch(batch, requester, allow_override=True)
+    if not saved:
+        raise ApprovalExpired("Nothing could be saved: those entries already exist")
+    return {"after": {"saved": len(saved), "pieces": sum(e["total_quantity"] for e in saved), "duplicates_skipped": dups}}
+
+
+approvals.register("quantity_override", prepare=prepare_quantity_override, apply=apply_quantity_override)
 
 # ===== NOTIFICATION ROUTES =====
 
@@ -1404,11 +1646,11 @@ async def review_edit_request(req_id: str, request: Request):
         # approving used to $set the raw client payload, so any field at all
         # (rate, total_earnings, operator_id) could be written straight into a
         # payroll record. Only quantities are accepted, and money is recomputed.
-        await assert_within_plan(lot, entry.get("color", ""), entry.get("operation_id", ""),
-                                 new_sq, exclude_entry_id=er["entry_id"])
+        if entry.get("counts_toward_plan", True):
+            await assert_within_plan(lot, entry.get("color", ""), entry.get("operation_id", ""),
+                                     new_sq, exclude_entry_id=er["entry_id"])
 
-        new_total = sum(new_sq.values())
-        new_earnings = round(new_total * entry.get("rate", 0), 2)
+        new_total, new_earnings = entry_money(entry, new_sq)
         await db.production_entries.update_one({"_id": ObjectId(er["entry_id"])}, {
             "$set": {"size_quantities": new_sq, "total_quantity": new_total,
                      "total_earnings": new_earnings, "modified_by": user["id"],
@@ -1445,7 +1687,12 @@ async def get_weekly_payroll_data(week_num, year):
             operator_map[op_id] = {"operator_id": op_id, "operator_name": entry.get("operator_name", ""),
                                    "operator_code": entry.get("operator_code", ""),
                                    "operations": {}, "total_quantity": 0, "total_earnings": 0.0}
+        # one line per (operation, rate type): the old code kept the FIRST rate it saw per
+        # operation name, which is wrong as soon as an operation is paid at two rates
         op_name = entry.get("operation_name", "")
+        rt_name = entry.get("rate_type_name", "")
+        if rt_name and rt_name != "Regular":
+            op_name = f"{op_name} ({rt_name})"
         if op_name not in operator_map[op_id]["operations"]:
             operator_map[op_id]["operations"][op_name] = {"operation_name": op_name, "quantity": 0,
                                                           "rate": entry.get("rate", 0), "earnings": 0.0}
@@ -1456,6 +1703,10 @@ async def get_weekly_payroll_data(week_num, year):
     operators = list(operator_map.values())
     for o in operators:
         o["operations"] = list(o["operations"].values())
+        for line in o["operations"]:
+            # weighted average when a line mixes rates (per-size rates, or a rate edited mid-week)
+            line["earnings"] = round(line["earnings"], 2)
+            line["rate"] = round(line["earnings"] / line["quantity"], 4) if line["quantity"] else line["rate"]
         o["total_earnings"] = round(o["total_earnings"], 2)
     operators.sort(key=lambda x: x["total_earnings"], reverse=True)
     return {"week_number": week_num, "year": year, "operators": operators,
@@ -1651,7 +1902,7 @@ async def report_lot_matrix(lot_id: str, request: Request):
     lot = serialize_doc(lot)
     lot = await enrich_lot(lot)
     sizes = lot.get("sizes", [])
-    entries = await db.production_entries.find({"lot_id": lot_id}).to_list(10000)
+    entries = await db.production_entries.find({"lot_id": lot_id, "counts_toward_plan": {"$ne": False}}).to_list(10000)
     produced = {}
     for e in entries:
         op = e.get("operation_name", "")
@@ -1762,7 +2013,7 @@ async def report_lot_color(lot_id: str, request: Request):
     lot = serialize_doc(lot)
     lot = await enrich_lot(lot)
     sizes = lot.get("sizes", [])
-    entries = await db.production_entries.find({"lot_id": lot_id}).to_list(10000)
+    entries = await db.production_entries.find({"lot_id": lot_id, "counts_toward_plan": {"$ne": False}}).to_list(10000)
     produced = {}
     for e in entries:
         c = e.get("color", "")
@@ -1865,7 +2116,7 @@ async def get_lot_report(lot_id: str, request: Request):
         raise HTTPException(404, "Lot not found")
     lot = serialize_doc(lot)
     lot = await enrich_lot(lot)
-    entries = await db.production_entries.find({"lot_id": lot_id}).to_list(10000)
+    entries = await db.production_entries.find({"lot_id": lot_id, "counts_toward_plan": {"$ne": False}}).to_list(10000)
     cs_map = {}
     for e in entries:
         color = e.get("color", "")
@@ -1932,6 +2183,8 @@ async def export_excel(request: Request, report_type: str, lot_id: Optional[str]
         ws.append(["Style", lot["style_name"]])
         ws.append(["Lot #", lot["lot_number"]])
         ws.append(["Status", lot["status"]])
+        ws.append(["Ordered", lot.get("total_order_qty", lot["total_planned_qty"])])
+        ws.append(["Allowance %", lot.get("allowance_pct", 0)])
         ws.append(["Planned", lot["total_planned_qty"]])
         ws.append(["Produced", lot["total_produced_qty"]])
         ws.append(["Balance", lot["balance_qty"]])
@@ -1957,8 +2210,9 @@ async def export_excel(request: Request, report_type: str, lot_id: Optional[str]
         # that actually had production against it
         for e in entries:
             for sz, qty in sorted(e.get("size_quantities", {}).items()):
+                rate_here = (e.get("size_rates") or {}).get(sz, e.get("rate_flat", e.get("rate", 0)))
                 ws.append([e.get("date", ""), e.get("color", ""), sz, e.get("operation_name", ""),
-                           qty, round(qty * e.get("rate", 0), 2)])
+                           qty, round(qty * rate_here, 2)])
 
     elif report_type == "salary" and week and year:
         ws.title = "Salary Report"
@@ -2009,7 +2263,8 @@ async def export_excel(request: Request, report_type: str, lot_id: Optional[str]
             op_cost[n]["qty"] += e["total_quantity"]
             op_cost[n]["cost"] += e["total_earnings"]
         for n, d in op_cost.items():
-            ws.append([n, d["rate"], d["qty"], d["cost"]])
+            # one operation can be paid at several rates; show what it actually averaged
+            ws.append([n, round(d["cost"] / d["qty"], 4) if d["qty"] else d["rate"], d["qty"], d["cost"]])
 
     output = io.BytesIO()
     wb.save(output)
@@ -2145,7 +2400,7 @@ async def reset_all_data(request: Request):
     collections_to_clear = ["operators", "operations", "colors_master", "size_charts",
                             "weeks", "lots", "production_entries", "advances",
                             "notifications", "edit_requests", "counters", "system_settings", "login_attempts",
-                            "enquiries", "rate_limits", "approvals", "operator_groups", "operation_groups"]
+                            "enquiries", "rate_limits", "approvals", "operator_groups", "operation_groups", "rate_types"]
     note(request, entity_type="system", summary="ALL DATA RESET by admin (audit log is kept)")
     cleared = []
     for col in collections_to_clear:
@@ -2153,6 +2408,7 @@ async def reset_all_data(request: Request):
         cleared.append(col)
     await db.users.delete_many({"role": {"$ne": "admin"}})
     await seed_settings()
+    await ratetypes.seed_rate_types()
     logger.info("ALL DATA RESET by admin")
     return {"message": "All data cleared. Admin user kept.", "cleared": cleared}
 
@@ -2308,6 +2564,7 @@ async def startup():
          ("operator_id", 1), ("date", 1)], name="entry_dedupe")
     await seed_admin()
     await seed_settings()
+    await ratetypes.seed_rate_types()
     logger.info("Victoria Unit Flow API started")
 
 @api_router.get("/health")
@@ -2323,6 +2580,7 @@ app.include_router(api_router)
 app.include_router(audit_router)
 app.include_router(approvals.router)
 app.include_router(groups_router)
+app.include_router(ratetypes.router)
 app.middleware("http")(audit_middleware)
 
 # ===== CORS =====
