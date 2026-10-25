@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Checkbox } from '../components/ui/checkbox';
 import { Badge } from '../components/ui/badge';
-import { Plus, Trash2, Save, ArrowLeft, Search, UsersRound, Lock } from 'lucide-react';
+import { Plus, Trash2, Save, ArrowLeft, Search, UsersRound, Lock, FileText } from 'lucide-react';
 
 // A stable id per operation row. The row used to be keyed on the chosen
 // operation id, so picking an operation changed the key, React rebuilt the row,
@@ -25,6 +25,7 @@ const mapToStrings = (obj) => Object.fromEntries(Object.entries(obj || {}).map((
 const cleanRates = (obj, sizes) => Object.fromEntries(
     sizes.filter(sz => String(obj?.[sz] ?? '').trim() !== '').map(sz => [sz, parseFloat(obj[sz])]));
 
+const newReq = () => ({ uid: uid(), item_id: '', basis: 'per_piece', qty: '' });
 const newOp = () => ({ uid: uid(), operation_id: '', rate: '', useSizes: false, sizeRates: {}, extras: {}, operator_ids: [] });
 
 /** One rate (flat + optional per-size overrides) for one rate type. */
@@ -74,6 +75,9 @@ export default function LotFormPage() {
     const [colorSizeQty, setColorSizeQty] = useState({});
     const [lotOps, setLotOps] = useState([]);
     const [qc, setQc] = useState({ over_tolerance_pct: '', warn_at_pct: '90', locked: {} });
+    const [reqs, setReqs] = useState([]);
+    const [postPct, setPostPct] = useState('');
+    const [stockItems, setStockItems] = useState([]);
 
     const [sizeCharts, setSizeCharts] = useState([]);
     const [colorsMaster, setColorsMaster] = useState([]);
@@ -93,8 +97,9 @@ export default function LotFormPage() {
 
     useEffect(() => {
         Promise.all([api.get('/size-charts'), api.get('/colors'), api.get('/operations'), api.get('/operators'),
-            api.get('/operator-groups'), api.get('/rate-types')])
-            .then(([sc, cm, ops, opers, og, rt]) => {
+            api.get('/operator-groups'), api.get('/rate-types'), api.get('/stock/items')])
+            .then(([sc, cm, ops, opers, og, rt, si]) => {
+                setStockItems(si.data.filter(i => i.active !== false));
                 setSizeCharts(sc.data);
                 setColorsMaster(cm.data);
                 setOperations(ops.data);
@@ -108,6 +113,9 @@ export default function LotFormPage() {
                 setForm({ style_name: lot.style_name, start_date: lot.start_date, target_end_date: lot.target_end_date });
                 setSizeChartId(lot.size_chart_id || '');
                 setAllowance(lot.allowance_pct ? String(lot.allowance_pct) : '');
+                setPostPct(lot.post_pct ? String(lot.post_pct) : '');
+                setReqs((lot.requirements || []).map(r => ({ uid: uid(), item_id: r.item_id, basis: r.basis,
+                    qty: String(r.basis === 'per_piece' ? r.qty_per_piece : r.total_qty) })));
                 setSelectedColors(lot.colors?.map(c => c.name) || []);
                 const csq = {};
                 lot.colors?.forEach(c => {
@@ -136,9 +144,10 @@ export default function LotFormPage() {
     }, [id, isEdit]);
 
     // ---- unsaved-changes guard: a long form must not vanish on a stray click
-    const snapshot = useMemo(() => JSON.stringify({ form, sizeChartId, allowance, selectedColors, colorSizeQty, qc,
+    const snapshot = useMemo(() => JSON.stringify({ form, sizeChartId, allowance, selectedColors, colorSizeQty, qc, postPct,
+        reqs: reqs.map(r => ({ item_id: r.item_id, basis: r.basis, qty: r.qty })),
         lotOps: lotOps.map(o => ({ operation_id: o.operation_id, rate: o.rate, useSizes: o.useSizes, sizeRates: o.sizeRates,
-            extras: o.extras, operator_ids: o.operator_ids })) }), [form, sizeChartId, allowance, selectedColors, colorSizeQty, qc, lotOps]);
+            extras: o.extras, operator_ids: o.operator_ids })) }), [form, sizeChartId, allowance, selectedColors, colorSizeQty, qc, postPct, reqs, lotOps]);
     useEffect(() => { if (loaded && initialRef.current === null) initialRef.current = snapshot; }, [loaded, snapshot]);
     const dirty = loaded && initialRef.current !== null && initialRef.current !== snapshot;
     useEffect(() => {
@@ -179,11 +188,9 @@ export default function LotFormPage() {
     const colOrder = (sz) => selectedColors.reduce((s, c) => s + orderOf(c, sz), 0);
     const colPlan = (sz) => selectedColors.reduce((s, c) => s + planOf(c, sz), 0);
     const totalOrder = useMemo(() => selectedColors.reduce((t, c) => t + sizes.reduce((s, sz) => s + orderOf(c, sz), 0), 0),
-        // eslint-disable-next-line react-hooks/exhaustive-deps
         [selectedColors, sizes, colorSizeQty]);
     // the overall total is the sum of the ROUNDED cells, never the rounded sum
     const totalPlanned = useMemo(() => selectedColors.reduce((t, c) => t + sizes.reduce((s, sz) => s + planOf(c, sz), 0), 0),
-        // eslint-disable-next-line react-hooks/exhaustive-deps
         [selectedColors, sizes, colorSizeQty, allowance]);
     const hasAllowance = (parseFloat(allowance) || 0) > 0;
 
@@ -261,6 +268,24 @@ export default function LotFormPage() {
             (gf === 'all' || (gf === 'none' ? !o.group_id : o.group_id === gf)));
     };
 
+    // ---- materials: the same rule as the server (backend/purchasing.py gross_requirement), as a live preview
+    const COUNTED = ['pcs', 'cone', 'box', 'roll'];
+    const grossFor = (r) => {
+        const it = stockItems.find(i => i.id === r.item_id);
+        const q = parseFloat(r.qty) || 0;
+        const base = r.basis === 'per_piece' ? q * totalPlanned : q;
+        const gross = base * (1 + (parseFloat(postPct) || 0) / 100);
+        const step = it && COUNTED.includes(it.uom) ? 1 : 0.001;
+        return Math.ceil(gross / step - 1e-9) * step;
+    };
+    const patchReq = (key, patch) => setReqs(reqs.map(r => (r.uid === key ? { ...r, ...patch } : r)));
+    const regenerate = async () => {
+        try {
+            const r = await api.post(`/lots/${id}/generate-po`);
+            toast.success(r.data.message, { duration: 6000 });
+        } catch (err) { toast.error(err.response?.data?.detail || 'Could not draft orders', { duration: 8000 }); }
+    };
+
     const toggleLock = (color, sz) => setQc(prev => {
         const locked = { ...prev.locked };
         const key = `${color}|${sz}`;
@@ -274,11 +299,15 @@ export default function LotFormPage() {
         if (selectedColors.length === 0) return toast.error('Select at least one color');
         if (lotOps.length === 0 || lotOps.some(o => !o.operation_id || o.rate === '')) return toast.error('Add operations with rates');
         if (lotOps.some(o => Object.values(o.extras).some(x => x.rate === ''))) return toast.error('Fill in the rate for every extra rate type you switched on');
+        if (reqs.some(r => r.item_id && !(parseFloat(r.qty) > 0))) return toast.error('Enter a quantity for every material you listed');
 
         setSaving(true);
         const payload = {
             ...form, size_chart_id: sizeChartId, color_names: selectedColors,
             color_size_quantities: colorSizeQty, allowance_pct: parseFloat(allowance) || 0,
+            post_pct: parseFloat(postPct) || 0,
+            requirements: reqs.filter(r => r.item_id).map(r => ({ item_id: r.item_id, basis: r.basis,
+                ...(r.basis === 'per_piece' ? { qty_per_piece: parseFloat(r.qty) } : { total_qty: parseFloat(r.qty) }) })),
             quantity_control: { over_tolerance_pct: parseFloat(qc.over_tolerance_pct) || 0,
                 warn_at_pct: parseFloat(qc.warn_at_pct) || 90, locked: qc.locked },
             operations: lotOps.map(o => ({
@@ -290,7 +319,11 @@ export default function LotFormPage() {
         };
         try {
             if (isEdit) { await api.put(`/lots/${id}`, payload); toast.success('Lot updated'); }
-            else { await api.post('/lots', payload); toast.success('Lot created'); }
+            else {
+                const created = await api.post('/lots', payload);
+                const n = created.data.draft_pos?.length || 0;
+                toast.success(n ? `Lot created. ${n} draft purchase order${n === 1 ? '' : 's'} ready to review.` : 'Lot created', { duration: 7000 });
+            }
             initialRef.current = snapshot;          // saved: nothing left to warn about
             navigate('/lots');
         } catch (err) {
@@ -314,11 +347,12 @@ export default function LotFormPage() {
             </div>
 
             <Tabs defaultValue="basic" className="w-full">
-                <TabsList className="grid w-full grid-cols-4 bg-slate-100">
+                <TabsList className="grid w-full grid-cols-5 bg-slate-100">
                     <TabsTrigger value="basic" data-testid="tab-basic">Basic</TabsTrigger>
                     <TabsTrigger value="planning" data-testid="tab-planning">Color & Size</TabsTrigger>
                     <TabsTrigger value="operations" data-testid="tab-operations">Operations</TabsTrigger>
                     <TabsTrigger value="assignment" data-testid="tab-assignment">Assignments</TabsTrigger>
+                    <TabsTrigger value="materials" data-testid="tab-materials">Materials</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="basic">
@@ -603,6 +637,62 @@ export default function LotFormPage() {
                                     </div>
                                 );
                             })}
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+                <TabsContent value="materials">
+                    <Card className="border-slate-200" data-testid="materials-card">
+                        <CardHeader className="pb-3"><CardTitle className="text-base font-outfit">Materials this lot needs</CardTitle></CardHeader>
+                        <CardContent className="space-y-3">
+                            <p className="text-xs text-slate-500">
+                                List what the lot consumes. The amount to buy adds a wastage buffer to the planned pieces ({totalPlanned.toLocaleString('en-IN')} pcs),
+                                then subtracts what is already in the store or on order. Purchase orders are drafted for you, never sent.
+                            </p>
+                            <div className="w-40">
+                                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Wastage buffer %</Label>
+                                <Input type="text" inputMode="decimal" value={postPct} onChange={e => setPostPct(rateText(e.target.value))}
+                                    placeholder="0" className="mt-1 font-mono" data-testid="post-pct" />
+                            </div>
+                            {reqs.map((r, i) => {
+                                const it = stockItems.find(x => x.id === r.item_id);
+                                return (
+                                    <div key={r.uid} className="grid grid-cols-12 items-end gap-2 rounded-md border border-slate-200 bg-slate-50/50 p-2" data-testid={`req-row-${i}`}>
+                                        <div className="col-span-12 sm:col-span-4">
+                                            <select className={`${selectCls} w-full`} value={r.item_id} onChange={e => patchReq(r.uid, { item_id: e.target.value })}
+                                                aria-label={`Material ${i + 1}`} data-testid={`req-item-${i}`}>
+                                                <option value="">Choose material</option>
+                                                {stockItems.map(x => <option key={x.id} value={x.id}>{x.name} ({x.uom})</option>)}
+                                            </select>
+                                        </div>
+                                        <div className="col-span-5 sm:col-span-3">
+                                            <select className={`${selectCls} w-full`} value={r.basis} onChange={e => patchReq(r.uid, { basis: e.target.value })}
+                                                aria-label={`Basis ${i + 1}`} data-testid={`req-basis-${i}`}>
+                                                <option value="per_piece">Per piece</option><option value="total">Total for the lot</option>
+                                            </select>
+                                        </div>
+                                        <div className="col-span-4 sm:col-span-2">
+                                            <Input type="text" inputMode="decimal" value={r.qty} placeholder={it ? it.uom : 'qty'}
+                                                onChange={e => patchReq(r.uid, { qty: rateText(e.target.value) })} className="font-mono"
+                                                aria-label={`Quantity ${i + 1}`} data-testid={`req-qty-${i}`} />
+                                        </div>
+                                        <div className="col-span-3 sm:col-span-2 text-right text-[11.5px] text-slate-500" data-testid={`req-gross-${i}`}>
+                                            {r.item_id && parseFloat(r.qty) > 0 ? <>need <strong className="tnum text-slate-800">{grossFor(r).toLocaleString('en-IN')}</strong> {it?.uom}</> : ''}
+                                        </div>
+                                        <div className="col-span-12 sm:col-span-1 text-right">
+                                            <Button variant="ghost" size="sm" className="text-red-500" aria-label={`Remove material ${i + 1}`}
+                                                onClick={() => setReqs(reqs.filter(x => x.uid !== r.uid))}><Trash2 size={14} /></Button>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                            {stockItems.length === 0 && <p className="text-xs text-amber-600">Add items on the Stock page first.</p>}
+                            <div className="flex flex-wrap gap-2">
+                                <Button variant="outline" onClick={() => setReqs([...reqs, newReq()])} className="gap-1.5" data-testid="add-requirement"><Plus size={14} /> Add material</Button>
+                                {isEdit && reqs.length > 0 && !dirty && (
+                                    <Button variant="outline" onClick={regenerate} className="gap-1.5" data-testid="regenerate-po"><FileText size={14} /> Draft purchase orders again</Button>)}
+                                {isEdit && <Button variant="ghost" onClick={() => navigate(`/purchase-orders?lot=${id}`)}>Open this lot's orders</Button>}
+                            </div>
+                            {isEdit && reqs.length > 0 && dirty && <p className="text-[11.5px] text-slate-400">Save your changes first, then orders can be drafted again.</p>}
                         </CardContent>
                     </Card>
                 </TabsContent>
