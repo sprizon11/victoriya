@@ -238,6 +238,17 @@ print("\n--- data entry never sees money ---")
 rows = call(clerk, "get", f"/production?lot_id={sz_lot['id']}").json()
 check("no rate, per-size rate or earnings reach a data-entry user",
       rows and not any(k in rows[0] for k in ("rate", "rate_flat", "size_rates", "total_earnings")), rows[0].keys() if rows else "")
+clerk_lots = call(clerk, "get", "/lots")
+check("a data-entry user can list open lots (they need them to record output)",
+      clerk_lots.status_code == 200 and any(l["id"] == rt_lot["id"] for l in clerk_lots.json()), clerk_lots.text[:150])
+blob = str(clerk_lots.json())
+check("...and the lot list carries no rate, rate card or labour cost",
+      "'rate':" not in blob and "size_rates" not in blob and "total_labour_cost" not in blob and "'cost':" not in blob, blob[:300])
+check("...the rate types appear by name only",
+      [r["rate_type_name"] for r in next(l for l in clerk_lots.json() if l["id"] == rt_lot["id"])["operations"][0]["rates"]] == ["Regular", "Sample", "Rework"])
+one = call(clerk, "get", f"/lots/{rt_lot['id']}").json()
+check("a single lot read is scrubbed the same way", "size_rates" not in str(one) and "total_labour_cost" not in one)
+check("a data-entry user still cannot open reports", call(clerk, "get", f"/reports/lot/{rt_lot['id']}").status_code == 403)
 check("lots list carries order and planned totals",
       any(l["id"] == lot["id"] and l["total_order_qty"] == 240 for l in call(admin, "get", "/lots").json()))
 check("Excel lot export still works with new fields",

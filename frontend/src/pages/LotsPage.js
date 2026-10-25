@@ -176,6 +176,11 @@ export default function LotsPage() {
                                             </td>
                                             <td className="tnum px-2.5 py-2 text-right text-slate-700">
                                                 {num(lot.total_planned_qty)}
+                                                {lot.allowance_qty > 0 && (
+                                                    <span className="block text-[10.5px] text-slate-400" data-testid={`order-${lot.id}`}>
+                                                        {num(lot.total_order_qty)} ordered + {num(lot.allowance_qty)} ({lot.allowance_pct}%)
+                                                    </span>
+                                                )}
                                             </td>
                                             <td className="px-2.5 py-2">
                                                 <Meter value={lot.progress} className="min-w-[130px]" />

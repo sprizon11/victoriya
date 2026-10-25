@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import api from '../lib/api';
+import { localDate } from '../lib/utils';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/button';
@@ -34,7 +35,8 @@ export default function ProductionEntryPage() {
     const [selectedLot, setSelectedLot] = useState(null);
     const [operationId, setOperationId] = useState('');
     const [color, setColor] = useState('');
-    const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+    const [date, setDate] = useState(localDate());
+    const [rateTypeId, setRateTypeId] = useState('');
     const [matrix, setMatrix] = useState({});
     const [tracking, setTracking] = useState([]);
     const [saving, setSaving] = useState(false);
@@ -44,6 +46,7 @@ export default function ProductionEntryPage() {
     const [logFilters, setLogFilters] = useState({ lot_id: '', week: '', operator_id: '', operation_id: '' });
     const [operators, setOperators] = useState([]);
     const [operations, setOperations] = useState([]);
+    const [rateTypes, setRateTypes] = useState([]);
     const [editDialog, setEditDialog] = useState(null);
     const [editReason, setEditReason] = useState('');
     const [editMatrix, setEditMatrix] = useState({});
@@ -55,13 +58,14 @@ export default function ProductionEntryPage() {
         api.get('/lots').then(r => setAllLots(r.data)).catch(() => {});
         api.get('/operators').then(r => setOperators(r.data)).catch(() => {});
         api.get('/operations').then(r => setOperations(r.data)).catch(() => {});
+        api.get('/rate-types').then(r => setRateTypes(r.data)).catch(() => {});
     }, []);
 
     // Default to the week that contains today, so the floor supervisor is not
     // one wrong dropdown away from filing a day against the wrong week.
     useEffect(() => {
         if (weekId || weeks.length === 0) return;
-        const today = new Date().toISOString().split('T')[0];
+        const today = localDate();
         const current = weeks.find(w => w.start_date <= today && w.end_date >= today);
         if (current) setWeekId(current.id);
     }, [weeks, weekId]);
@@ -69,7 +73,7 @@ export default function ProductionEntryPage() {
     const handleLotChange = (id) => {
         setLotId(id);
         setSelectedLot(lots.find(l => l.id === id));
-        setOperationId(''); setColor(''); setMatrix({});
+        setOperationId(''); setColor(''); setMatrix({}); setRateTypeId('');
     };
 
     const loadTracking = useCallback(async () => {
@@ -199,14 +203,27 @@ export default function ProductionEntryPage() {
 
     const selectedOp = selectedLot?.operations?.find(o => o.operation_id === operationId);
     const assignedOperators = selectedOp?.operators || [];
+    // the rate card for this operation: Regular always, plus Sample / Rework when the lot set them
+    const rateRows = selectedOp?.rates?.length ? selectedOp.rates : (selectedOp ? [{ rate_type_id: '', rate_type_name: 'Regular', rate: selectedOp.rate, size_rates: {} }] : []);
+    const selectedRate = rateRows.find(r => r.rate_type_id === rateTypeId) || rateRows[0];
+    const rateTypeMeta = (id) => rateTypes.find(t => t.id === id);
+    const selectedRateCounts = selectedRate ? rateTypeMeta(selectedRate.rate_type_id)?.counts_toward_plan !== false : true;
+    const rateFor = (sz) => (selectedRate?.size_rates?.[sz] ?? selectedRate?.rate ?? 0);
     const sizes = selectedLot?.sizes || [];
     const colorTracking = tracking.find(t => t.name === color);
 
+    const sizeInfo = useCallback((size) => colorTracking?.sizes?.find(x => x.size === size), [colorTracking]);
+
     const getBalance = useCallback((size) => {
-        if (!colorTracking) return null;
-        const st = colorTracking.sizes?.find(s => s.size === size);
+        const st = sizeInfo(size);
         return st ? st.balance : null;
-    }, [colorTracking]);
+    }, [sizeInfo]);
+
+    // the most that can be typed: the plan, plus the lot's tolerance (which needs approval)
+    const getMaxEntry = useCallback((size) => {
+        const st = sizeInfo(size);
+        return st ? st.max_with_tolerance - st.produced : null;
+    }, [sizeInfo]);
 
     const getNewTotal = useCallback((size) => {
         let total = 0;
@@ -214,13 +231,16 @@ export default function ProductionEntryPage() {
         return total;
     }, [matrix]);
 
+    // sample / rework pieces are paid but are not part of the plan, so the plan limits do not apply to them
+    const countsToPlan = selectedRateCounts;
+
     const updateCell = (opId, size, val) => {
         const numVal = parseInt(val) || 0;
-        const bal = getBalance(size);
+        const max = countsToPlan ? getMaxEntry(size) : null;
         const otherTotal = Object.entries(matrix).reduce((sum, [id, ops]) =>
             id === opId ? sum : sum + (parseInt(ops[size]) || 0), 0);
-        if (bal !== null && numVal + otherTotal > bal) {
-            const maxAllowed = Math.max(0, bal - otherTotal);
+        if (max !== null && numVal + otherTotal > max) {
+            const maxAllowed = Math.max(0, max - otherTotal);
             toast.error(`${size}: only ${maxAllowed} left against the plan`);
             setMatrix(prev => ({ ...prev, [opId]: { ...(prev[opId] || {}), [size]: String(maxAllowed) } }));
             return;
@@ -228,13 +248,38 @@ export default function ProductionEntryPage() {
         setMatrix(prev => ({ ...prev, [opId]: { ...(prev[opId] || {}), [size]: val } }));
     };
 
-    const hasExceeded = sizes.some(s => {
+    // blocked outright: beyond the plan AND beyond any tolerance
+    const hasExceeded = countsToPlan && sizes.some(s => {
+        const m = getMaxEntry(s);
+        return m !== null && getNewTotal(s) > m;
+    });
+    // inside the tolerance: allowed, but only once an administrator approves
+    const needsApproval = countsToPlan && !hasExceeded && sizes.some(s => {
         const b = getBalance(s);
         return b !== null && getNewTotal(s) > b;
     });
 
     const totalPieces = Object.values(matrix).reduce(
         (sum, ops) => sum + Object.values(ops).reduce((s, q) => s + (parseInt(q) || 0), 0), 0);
+
+    const batchBody = (entries) => ({
+        week_id: weekId, lot_id: lotId, operation_id: operationId, color, date, entries,
+        ...(selectedRate?.rate_type_id ? { rate_type_id: selectedRate.rate_type_id } : {}),
+    });
+
+    // Over the plan but inside the lot's tolerance: nothing is saved until an administrator
+    // approves. An administrator is the approver, so for them it is one click.
+    const requestOverrun = async (entries) => {
+        const r = await api.post('/approvals', { type: 'quantity_override', entity_id: lotId,
+            reason: `Extra pieces beyond the plan on ${date}`, payload: batchBody(entries) });
+        if (isAdmin) {
+            await api.post(`/approvals/${r.data.id}/approve`, { note: 'Approved by the administrator who entered it' });
+            toast.success('Saved. The extra pieces were approved and recorded.');
+        } else {
+            toast.success('Sent for approval. Nothing is saved until an administrator approves.', { duration: 8000 });
+        }
+        window.dispatchEvent(new Event('approvals-changed'));
+    };
 
     const handleSubmit = async () => {
         if (!weekId) return toast.error('Select a week');
@@ -256,22 +301,31 @@ export default function ProductionEntryPage() {
 
         setSaving(true);
         try {
-            const r = await api.post('/production/batch', {
-                week_id: weekId, lot_id: lotId, operation_id: operationId, color, date, entries,
-            });
-            const d = r.data;
-            if (d.duplicates_skipped?.length > 0) {
-                toast.warning(
-                    `${d.saved} saved. Already recorded for ${date}: ${d.duplicates_skipped.join(', ')}`,
-                    { duration: 7000 });
+            if (needsApproval) {
+                await requestOverrun(entries);
             } else {
-                toast.success(`${d.saved} ${d.saved === 1 ? 'entry' : 'entries'} saved for ${date}`);
+                const r = await api.post('/production/batch', batchBody(entries));
+                const d = r.data;
+                if (d.duplicates_skipped?.length > 0) {
+                    toast.warning(
+                        `${d.saved} saved. Already recorded for ${date}: ${d.duplicates_skipped.join(', ')}`,
+                        { duration: 7000 });
+                } else {
+                    toast.success(`${d.saved} ${d.saved === 1 ? 'entry' : 'entries'} saved for ${date}`);
+                }
             }
             setMatrix({});
             loadTracking();
             loadRecentEntries();
         } catch (err) {
-            toast.error(err.response?.data?.detail || 'Could not save entries', { duration: 7000 });
+            const detail = err.response?.data?.detail;
+            if (err.response?.status === 409 && detail?.code === 'needs_approval') {
+                // the server knows something the screen did not (e.g. someone else just entered pieces)
+                try { await requestOverrun(entries); setMatrix({}); loadTracking(); loadRecentEntries(); }
+                catch (e2) { toast.error(e2.response?.data?.detail?.message || e2.response?.data?.detail || 'Could not request approval', { duration: 7000 }); }
+            } else {
+                toast.error(typeof detail === 'string' ? detail : (detail?.message || 'Could not save entries'), { duration: 7000 });
+            }
         } finally { setSaving(false); }
     };
 
@@ -359,6 +413,26 @@ export default function ProductionEntryPage() {
                                     className="mt-1 font-mono" data-testid="prod-date" />
                             </div>
                         </div>
+                        {rateRows.length > 1 && (
+                            <div className="mt-3 flex flex-wrap items-center gap-2" data-testid="rate-type-picker" role="group" aria-label="Rate type">
+                                <span className="text-[11.5px] font-medium text-slate-500">Paid as</span>
+                                {rateRows.map(r => {
+                                    const on = (selectedRate?.rate_type_id || '') === (r.rate_type_id || '');
+                                    return (
+                                        <button key={r.rate_type_id || 'regular'} type="button" aria-pressed={on}
+                                            onClick={() => { setRateTypeId(r.rate_type_id); setMatrix({}); }}
+                                            data-testid={`rate-type-${r.rate_type_name}`}
+                                            className={`cursor-pointer rounded-full px-3 py-1 text-[12px] font-medium ring-1 ring-inset transition-colors
+                                                ${on ? 'bg-brand text-white ring-brand' : 'bg-white text-slate-600 ring-slate-200 hover:bg-slate-50'}`}>
+                                            {r.rate_type_name}{canViewFinancial && ` · ₹${r.rate}`}
+                                        </button>
+                                    );
+                                })}
+                                {!selectedRateCounts && (
+                                    <span className="text-[11.5px] text-amber-700">Paid, but not counted toward the lot plan.</span>
+                                )}
+                            </div>
+                        )}
                         <p className="mt-2.5 flex items-start gap-1.5 text-[11.5px] text-muted-foreground">
                             <CalendarDays size={12} className="mt-0.5 shrink-0" />
                             Enter one day at a time. Each operator can have one entry per day for this
@@ -430,7 +504,7 @@ export default function ProductionEntryPage() {
                                     {canViewFinancial && selectedOp && (
                                         <span className="text-muted-foreground">
                                             Wages <span className="tnum font-semibold text-leaf">
-                                                {inr(totalPieces * selectedOp.rate)}
+                                                {inr(sizes.reduce((sum, sz) => sum + getNewTotal(sz) * rateFor(sz), 0))}
                                             </span>
                                         </span>
                                     )}
@@ -445,13 +519,17 @@ export default function ProductionEntryPage() {
                                                 Operator
                                             </th>
                                             {sizes.map(s => {
-                                                const bal = getBalance(s);
-                                                const exceeded = bal !== null && getNewTotal(s) > bal;
+                                                const bal = countsToPlan ? getBalance(s) : null;
+                                                const info = countsToPlan ? sizeInfo(s) : null;
+                                                const max = countsToPlan ? getMaxEntry(s) : null;
+                                                const exceeded = max !== null && getNewTotal(s) > max;
+                                                const approval = !exceeded && bal !== null && getNewTotal(s) > bal;
                                                 return (
                                                     <th key={s}
                                                         className={`min-w-[66px] border-b border-l border-border px-2 py-1.5 text-center text-[10px] font-semibold uppercase
-                                                            ${exceeded ? 'bg-rose-50 text-rose-600' : 'text-muted-foreground'}`}>
-                                                        {s}
+                                                            ${exceeded ? 'bg-rose-50 text-rose-600' : approval ? 'bg-amber-50 text-amber-700'
+                                                                : info?.warn ? 'bg-amber-50/60 text-amber-700' : 'text-muted-foreground'}`}>
+                                                        {s}{info?.locked && <span title="Locked by the administrator"> 🔒</span>}
                                                         {bal !== null && (
                                                             <div className={`tnum text-[9px] font-normal normal-case
                                                                 ${bal <= 0 ? 'text-rose-500' : 'text-slate-400'}`}>
@@ -480,8 +558,9 @@ export default function ProductionEntryPage() {
                                                         </span>
                                                     </td>
                                                     {sizes.map(sz => {
-                                                        const bal = getBalance(sz);
-                                                        const disabled = bal !== null && bal <= 0;
+                                                        const bal = countsToPlan ? getMaxEntry(sz) : null;
+                                                        const locked = countsToPlan && sizeInfo(sz)?.locked;
+                                                        const disabled = locked || (bal !== null && bal <= 0);
                                                         return (
                                                             <td key={sz}
                                                                 className={`border-l border-border/60 p-0 ${disabled ? 'bg-slate-50' : ''}`}>
@@ -507,6 +586,14 @@ export default function ProductionEntryPage() {
                                 </table>
                             </div>
 
+                            {needsApproval && (
+                                <div className="animate-rise-sm flex items-center gap-2 border-t border-amber-200 bg-amber-50 px-4 py-2 text-[12px] text-amber-800"
+                                    data-testid="qty-approval-warning">
+                                    <ShieldAlert size={14} />
+                                    {isAdmin ? 'Over the plan, within the allowed tolerance. Saving will record these extra pieces as approved.'
+                                        : 'Over the plan, within the allowed tolerance. Nothing is saved until an administrator approves.'}
+                                </div>
+                            )}
                             {hasExceeded && (
                                 <div className="animate-rise-sm flex items-center gap-2 border-t border-rose-200 bg-rose-50 px-4 py-2 text-[12px] text-rose-700"
                                     data-testid="qty-exceeded-warning">
@@ -521,7 +608,7 @@ export default function ProductionEntryPage() {
                                 </p>
                                 <Button onClick={handleSubmit} loading={saving} disabled={hasExceeded || totalPieces === 0}
                                     data-testid="submit-production">
-                                    <Save size={14} /> {saving ? 'Saving…' : 'Save production'}
+                                    <Save size={14} /> {saving ? 'Saving…' : needsApproval ? (isAdmin ? 'Approve and save' : 'Request approval') : 'Save production'}
                                 </Button>
                             </div>
                         </Panel>
@@ -559,7 +646,7 @@ export default function ProductionEntryPage() {
                                         {recentEntries.slice(0, 40).map(e => (
                                             <tr key={e.id} className="border-b border-border/50 transition-colors hover:bg-brand-50/40">
                                                 <td className="tnum whitespace-nowrap px-2.5 py-1.5 text-muted-foreground">{e.date}</td>
-                                                <td className="px-2.5 py-1.5">{e.operation_name}</td>
+                                                <td className="px-2.5 py-1.5">{e.operation_name}{e.rate_type_name && e.rate_type_name !== 'Regular' && <Pill tone="amber" className="ml-1.5">{e.rate_type_name}</Pill>}</td>
                                                 <td className="px-2.5 py-1.5">{e.color}</td>
                                                 <td className="px-2.5 py-1.5">
                                                     {e.operator_name}
@@ -663,7 +750,7 @@ export default function ProductionEntryPage() {
                                                 <td className="tnum whitespace-nowrap px-2.5 py-1.5">{e.date}</td>
                                                 <td className="tnum px-2.5 py-1.5 text-muted-foreground">W{e.week_number}</td>
                                                 <td className="whitespace-nowrap px-2.5 py-1.5 font-mono text-[11px] text-brand">{e.lot_number}</td>
-                                                <td className="px-2.5 py-1.5">{e.operation_name}</td>
+                                                <td className="px-2.5 py-1.5">{e.operation_name}{e.rate_type_name && e.rate_type_name !== 'Regular' && <Pill tone="amber" className="ml-1.5">{e.rate_type_name}</Pill>}</td>
                                                 <td className="px-2.5 py-1.5">{e.color}</td>
                                                 <td className="whitespace-nowrap px-2.5 py-1.5">
                                                     {e.operator_name}

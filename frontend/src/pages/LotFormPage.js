@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../lib/api';
+import { plannedFromOrder } from '../lib/utils';
 import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -10,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Checkbox } from '../components/ui/checkbox';
 import { Badge } from '../components/ui/badge';
-import { Plus, Trash2, Save, ArrowLeft, Search, UsersRound } from 'lucide-react';
+import { Plus, Trash2, Save, ArrowLeft, Search, UsersRound, Lock } from 'lucide-react';
 
 // A stable id per operation row. The row used to be keyed on the chosen
 // operation id, so picking an operation changed the key, React rebuilt the row,
@@ -18,6 +19,48 @@ import { Plus, Trash2, Save, ArrowLeft, Search, UsersRound } from 'lucide-react'
 const uid = () => (window.crypto?.randomUUID ? window.crypto.randomUUID() : `r${Date.now()}${Math.random()}`);
 
 const selectCls = 'h-9 rounded-md border border-input bg-white px-2 text-sm';
+const rateText = (v) => String(v ?? '').replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
+const digits = (v) => String(v ?? '').replace(/\D/g, '').slice(0, 7);
+const mapToStrings = (obj) => Object.fromEntries(Object.entries(obj || {}).map(([k, v]) => [k, String(v)]));
+const cleanRates = (obj, sizes) => Object.fromEntries(
+    sizes.filter(sz => String(obj?.[sz] ?? '').trim() !== '').map(sz => [sz, parseFloat(obj[sz])]));
+
+const newOp = () => ({ uid: uid(), operation_id: '', rate: '', useSizes: false, sizeRates: {}, extras: {}, operator_ids: [] });
+
+/** One rate (flat + optional per-size overrides) for one rate type. */
+function RateEditor({ label, rate, onRate, useSizes, onUseSizes, sizeRates, onSizeRate, sizes, testid }) {
+    return (
+        <div className="rounded-md border border-slate-200 bg-white p-2.5" data-testid={`${testid}-editor`}>
+            <div className="flex flex-wrap items-center gap-3">
+                <span className="w-24 text-xs font-semibold text-slate-600">{label}</span>
+                <div className="flex items-center gap-1">
+                    <span className="text-xs text-slate-500">Rate</span>
+                    <Input type="text" inputMode="decimal" value={rate} onChange={e => onRate(rateText(e.target.value))}
+                        placeholder="0.00" className="w-24 font-mono" data-testid={`${testid}-rate`} aria-label={`${label} rate`} />
+                </div>
+                {sizes.length > 0 && (
+                    <label className="flex cursor-pointer items-center gap-1.5 text-xs text-slate-600">
+                        <Checkbox checked={useSizes} onCheckedChange={v => onUseSizes(!!v)} data-testid={`${testid}-sizes-toggle`} />
+                        Different rate per size
+                    </label>
+                )}
+            </div>
+            {useSizes && (
+                <div className="mt-2 flex flex-wrap gap-2" data-testid={`${testid}-sizes`}>
+                    {sizes.map(sz => (
+                        <label key={sz} className="flex flex-col items-center gap-0.5 text-[10px] font-semibold uppercase text-slate-500">
+                            {sz}
+                            <Input type="text" inputMode="decimal" value={sizeRates[sz] ?? ''} placeholder={rate || '0'}
+                                onChange={e => onSizeRate(sz, rateText(e.target.value))}
+                                className="h-8 w-16 text-center font-mono" data-testid={`${testid}-size-${sz}`} aria-label={`${label} rate for size ${sz}`} />
+                        </label>
+                    ))}
+                    <p className="basis-full text-[10.5px] text-slate-400">Leave a size blank to use the flat rate.</p>
+                </div>
+            )}
+        </div>
+    );
+}
 
 export default function LotFormPage() {
     const { id } = useParams();
@@ -26,15 +69,18 @@ export default function LotFormPage() {
 
     const [form, setForm] = useState({ style_name: '', start_date: '', target_end_date: '' });
     const [sizeChartId, setSizeChartId] = useState('');
+    const [allowance, setAllowance] = useState('');
     const [selectedColors, setSelectedColors] = useState([]);
     const [colorSizeQty, setColorSizeQty] = useState({});
     const [lotOps, setLotOps] = useState([]);
+    const [qc, setQc] = useState({ over_tolerance_pct: '', warn_at_pct: '90', locked: {} });
 
     const [sizeCharts, setSizeCharts] = useState([]);
     const [colorsMaster, setColorsMaster] = useState([]);
     const [operations, setOperations] = useState([]);
     const [operators, setOperators] = useState([]);
     const [operatorGroups, setOperatorGroups] = useState([]);
+    const [rateTypes, setRateTypes] = useState([]);
     const [operatorSearch, setOperatorSearch] = useState({});
     const [groupFilter, setGroupFilter] = useState({});          // per operation row: all | none | group id
     const [saving, setSaving] = useState(false);
@@ -42,40 +88,57 @@ export default function LotFormPage() {
     const initialRef = useRef(null);
     const cellRefs = useRef({});
 
+    const defaultType = rateTypes.find(t => t.is_default);
+    const otherTypes = rateTypes.filter(t => !t.is_default && t.active !== false);
+
     useEffect(() => {
-        Promise.all([api.get('/size-charts'), api.get('/colors'), api.get('/operations'), api.get('/operators'), api.get('/operator-groups')])
-            .then(([sc, cm, ops, opers, og]) => {
+        Promise.all([api.get('/size-charts'), api.get('/colors'), api.get('/operations'), api.get('/operators'),
+            api.get('/operator-groups'), api.get('/rate-types')])
+            .then(([sc, cm, ops, opers, og, rt]) => {
                 setSizeCharts(sc.data);
                 setColorsMaster(cm.data);
                 setOperations(ops.data);
                 setOperators(opers.data.filter(o => o.active));
                 setOperatorGroups(og.data);
+                setRateTypes(rt.data);
             });
         if (isEdit) {
             api.get(`/lots/${id}`).then(r => {
                 const lot = r.data;
                 setForm({ style_name: lot.style_name, start_date: lot.start_date, target_end_date: lot.target_end_date });
                 setSizeChartId(lot.size_chart_id || '');
-                const colors = lot.colors?.map(c => c.name) || [];
-                setSelectedColors(colors);
+                setAllowance(lot.allowance_pct ? String(lot.allowance_pct) : '');
+                setSelectedColors(lot.colors?.map(c => c.name) || []);
                 const csq = {};
                 lot.colors?.forEach(c => {
                     csq[c.name] = {};
-                    c.sizes?.forEach(s => { csq[c.name][s.size] = String(s.planned_qty); });
+                    c.sizes?.forEach(s => { csq[c.name][s.size] = String(s.order_qty ?? s.planned_qty); });   // the ORDER, not the plan
                 });
                 setColorSizeQty(csq);
-                setLotOps(lot.operations?.map(o => ({
-                    uid: uid(), operation_id: o.operation_id, rate: String(o.rate),
-                    operator_ids: o.operators?.map(op => op.operator_id) || []
-                })) || []);
+                const q = lot.quantity_control || {};
+                setQc({ over_tolerance_pct: q.over_tolerance_pct ? String(q.over_tolerance_pct) : '', warn_at_pct: String(q.warn_at_pct ?? 90),
+                    locked: q.locked || {} });
+                setLotOps(lot.operations?.map(o => {
+                    const rows = o.rates || [];
+                    const regular = rows[0] || { rate: o.rate, size_rates: o.size_rates || {} };
+                    const extras = {};
+                    rows.slice(1).forEach(r => {
+                        extras[r.rate_type_id] = { rate: String(r.rate), useSizes: Object.keys(r.size_rates || {}).length > 0,
+                            sizeRates: mapToStrings(r.size_rates) };
+                    });
+                    return { uid: uid(), operation_id: o.operation_id, rate: String(regular.rate ?? o.rate),
+                        useSizes: Object.keys(regular.size_rates || {}).length > 0, sizeRates: mapToStrings(regular.size_rates),
+                        extras, operator_ids: o.operators?.map(op => op.operator_id) || [] };
+                }) || []);
                 setLoaded(true);
             });
         }
     }, [id, isEdit]);
 
     // ---- unsaved-changes guard: a long form must not vanish on a stray click
-    const snapshot = useMemo(() => JSON.stringify({ form, sizeChartId, selectedColors, colorSizeQty,
-        lotOps: lotOps.map(o => ({ operation_id: o.operation_id, rate: o.rate, operator_ids: o.operator_ids })) }),[form, sizeChartId, selectedColors, colorSizeQty, lotOps]);
+    const snapshot = useMemo(() => JSON.stringify({ form, sizeChartId, allowance, selectedColors, colorSizeQty, qc,
+        lotOps: lotOps.map(o => ({ operation_id: o.operation_id, rate: o.rate, useSizes: o.useSizes, sizeRates: o.sizeRates,
+            extras: o.extras, operator_ids: o.operator_ids })) }), [form, sizeChartId, allowance, selectedColors, colorSizeQty, qc, lotOps]);
     useEffect(() => { if (loaded && initialRef.current === null) initialRef.current = snapshot; }, [loaded, snapshot]);
     const dirty = loaded && initialRef.current !== null && initialRef.current !== snapshot;
     useEffect(() => {
@@ -105,15 +168,24 @@ export default function LotFormPage() {
 
     // Quantities are kept as the text the user typed (digits only); they are
     // parsed on save. Re-formatting while typing is what moves the caret.
-    const digits = (v) => String(v ?? '').replace(/\D/g, '').slice(0, 7);
     const updateQty = (color, size, val) => {
         setColorSizeQty(prev => ({ ...prev, [color]: { ...prev[color], [size]: digits(val) } }));
     };
 
-    const rowTotal = (color) => sizes.reduce((s, sz) => s + (parseInt(colorSizeQty[color]?.[sz], 10) || 0), 0);
-    const colTotal = (sz) => selectedColors.reduce((s, c) => s + (parseInt(colorSizeQty[c]?.[sz], 10) || 0), 0);
-    const totalPlanned = useMemo(() => selectedColors.reduce((t, c) =>
-        t + sizes.reduce((s, sz) => s + (parseInt(colorSizeQty[c]?.[sz], 10) || 0), 0), 0), [selectedColors, sizes, colorSizeQty]);
+    const orderOf = (c, sz) => parseInt(colorSizeQty[c]?.[sz], 10) || 0;
+    const planOf = (c, sz) => plannedFromOrder(orderOf(c, sz), allowance);
+    const rowOrder = (c) => sizes.reduce((s, sz) => s + orderOf(c, sz), 0);
+    const rowPlan = (c) => sizes.reduce((s, sz) => s + planOf(c, sz), 0);
+    const colOrder = (sz) => selectedColors.reduce((s, c) => s + orderOf(c, sz), 0);
+    const colPlan = (sz) => selectedColors.reduce((s, c) => s + planOf(c, sz), 0);
+    const totalOrder = useMemo(() => selectedColors.reduce((t, c) => t + sizes.reduce((s, sz) => s + orderOf(c, sz), 0), 0),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [selectedColors, sizes, colorSizeQty]);
+    // the overall total is the sum of the ROUNDED cells, never the rounded sum
+    const totalPlanned = useMemo(() => selectedColors.reduce((t, c) => t + sizes.reduce((s, sz) => s + planOf(c, sz), 0), 0),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [selectedColors, sizes, colorSizeQty, allowance]);
+    const hasAllowance = (parseFloat(allowance) || 0) > 0;
 
     // ---- spreadsheet behaviour for the quantity grid
     const focusCell = useCallback((r, c) => {
@@ -149,10 +221,20 @@ export default function LotFormPage() {
     };
 
     // ---- operations
-    const addOp = () => setLotOps([...lotOps, { uid: uid(), operation_id: '', rate: '', operator_ids: [] }]);
+    const addOp = () => setLotOps([...lotOps, newOp()]);
     const removeOp = (key) => setLotOps(lotOps.filter(o => o.uid !== key));
-    const updateOp = (key, field, val) => setLotOps(lotOps.map(o => (o.uid === key ? { ...o, [field]: val } : o)));
-    const setOperatorIds = (key, ids) => setLotOps(lotOps.map(o => (o.uid === key ? { ...o, operator_ids: ids } : o)));
+    const patchOp = (key, patch) => setLotOps(lotOps.map(o => (o.uid === key ? { ...o, ...patch } : o)));
+    const updateOp = (key, field, val) => patchOp(key, { [field]: val });
+    const setSizeRate = (key, sz, v) => setLotOps(lotOps.map(o => (o.uid === key ? { ...o, sizeRates: { ...o.sizeRates, [sz]: v } } : o)));
+    const patchExtra = (key, typeId, patch) => setLotOps(lotOps.map(o => (o.uid === key
+        ? { ...o, extras: { ...o.extras, [typeId]: { rate: '', useSizes: false, sizeRates: {}, ...o.extras[typeId], ...patch } } } : o)));
+    const toggleExtra = (key, typeId) => setLotOps(lotOps.map(o => {
+        if (o.uid !== key) return o;
+        const extras = { ...o.extras };
+        if (typeId in extras) delete extras[typeId]; else extras[typeId] = { rate: '', useSizes: false, sizeRates: {} };
+        return { ...o, extras };
+    }));
+    const setOperatorIds = (key, ids) => patchOp(key, { operator_ids: ids });
     const toggleOperator = (key, opId) => {
         const op = lotOps.find(o => o.uid === key);
         setOperatorIds(key, op.operator_ids.includes(opId) ? op.operator_ids.filter(x => x !== opId) : [...op.operator_ids, opId]);
@@ -179,17 +261,32 @@ export default function LotFormPage() {
             (gf === 'all' || (gf === 'none' ? !o.group_id : o.group_id === gf)));
     };
 
+    const toggleLock = (color, sz) => setQc(prev => {
+        const locked = { ...prev.locked };
+        const key = `${color}|${sz}`;
+        if (locked[key]) delete locked[key]; else locked[key] = true;
+        return { ...prev, locked };
+    });
+
     const handleSave = async () => {
         if (!form.style_name || !form.start_date || !form.target_end_date) return toast.error('Fill basic details');
         if (!sizeChartId) return toast.error('Select a size chart');
         if (selectedColors.length === 0) return toast.error('Select at least one color');
         if (lotOps.length === 0 || lotOps.some(o => !o.operation_id || o.rate === '')) return toast.error('Add operations with rates');
+        if (lotOps.some(o => Object.values(o.extras).some(x => x.rate === ''))) return toast.error('Fill in the rate for every extra rate type you switched on');
 
         setSaving(true);
         const payload = {
             ...form, size_chart_id: sizeChartId, color_names: selectedColors,
-            color_size_quantities: colorSizeQty,
-            operations: lotOps.map(o => ({ operation_id: o.operation_id, rate: parseFloat(o.rate), operator_ids: o.operator_ids }))
+            color_size_quantities: colorSizeQty, allowance_pct: parseFloat(allowance) || 0,
+            quantity_control: { over_tolerance_pct: parseFloat(qc.over_tolerance_pct) || 0,
+                warn_at_pct: parseFloat(qc.warn_at_pct) || 90, locked: qc.locked },
+            operations: lotOps.map(o => ({
+                operation_id: o.operation_id, rate: parseFloat(o.rate), operator_ids: o.operator_ids,
+                size_rates: o.useSizes ? cleanRates(o.sizeRates, sizes) : null,
+                extra_rates: Object.entries(o.extras).map(([typeId, x]) => ({
+                    rate_type_id: typeId, rate: parseFloat(x.rate), size_rates: x.useSizes ? cleanRates(x.sizeRates, sizes) : null })),
+            })),
         };
         try {
             if (isEdit) { await api.put(`/lots/${id}`, payload); toast.success('Lot updated'); }
@@ -198,17 +295,22 @@ export default function LotFormPage() {
             navigate('/lots');
         } catch (err) {
             // stay on the form with everything the user typed; say exactly why it was refused
-            toast.error(err.response?.data?.detail || 'Error saving lot', { duration: 8000 });
+            const d = err.response?.data?.detail;
+            toast.error(typeof d === 'string' ? d : (d?.message || 'Error saving lot'), { duration: 8000 });
         } finally { setSaving(false); }
     };
 
     return (
         <div className="space-y-4 max-w-5xl" data-testid="lot-form-page">
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
                 <Button variant="ghost" size="sm" onClick={leave} aria-label="Back to lots" data-testid="back-to-lots"><ArrowLeft size={16} /></Button>
                 <h1 className="text-2xl font-semibold text-slate-900 font-outfit">{isEdit ? 'Edit Lot' : 'Create New Lot'}</h1>
                 {dirty && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10.5px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-200" data-testid="unsaved-chip">Unsaved changes</span>}
-                <span className="text-sm font-mono text-slate-500 ml-auto" data-testid="lot-total">Total: {totalPlanned.toLocaleString('en-IN')} pcs</span>
+                <span className="ml-auto text-sm font-mono text-slate-500" data-testid="lot-total">
+                    {hasAllowance
+                        ? <>Order {totalOrder.toLocaleString('en-IN')} + {(totalPlanned - totalOrder).toLocaleString('en-IN')} = <strong className="text-brand">{totalPlanned.toLocaleString('en-IN')} pcs</strong></>
+                        : <>Total: {totalPlanned.toLocaleString('en-IN')} pcs</>}
+                </span>
             </div>
 
             <Tabs defaultValue="basic" className="w-full">
@@ -272,6 +374,17 @@ export default function LotFormPage() {
                                     {colorsMaster.length === 0 && <p className="text-xs text-slate-400">No colors in master. Add them from Colors page.</p>}
                                 </div>
                             </div>
+                            <div className="flex flex-wrap items-end gap-3 rounded-lg bg-slate-50 p-3">
+                                <div>
+                                    <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Allowance %</Label>
+                                    <Input type="text" inputMode="decimal" value={allowance} onChange={e => setAllowance(rateText(e.target.value))}
+                                        placeholder="0" className="mt-1 w-28 font-mono" data-testid="allowance-input" aria-describedby="allowance-help" />
+                                </div>
+                                <p id="allowance-help" className="max-w-md text-[11.5px] text-slate-500">
+                                    Extra pieces added to what was ordered, rounded to the nearest whole piece per size
+                                    (115.5 becomes 116; 115.49 stays 115). Type the <strong>ordered</strong> quantities below.
+                                </p>
+                            </div>
                             {!sizeChartId && <p className="text-sm text-amber-600 bg-amber-50 px-3 py-2 rounded">Select a size chart in the Basic tab first</p>}
                             {selectedColors.length > 0 && sizes.length > 0 && (
                                 <>
@@ -283,7 +396,7 @@ export default function LotFormPage() {
                                             <thead>
                                                 <tr className="bg-slate-50">
                                                     <th className="sticky left-0 z-10 bg-slate-50 border-r border-b border-slate-200 px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500">Color</th>
-                                                    {sizes.map(s => <th key={s} className="border-r border-b border-slate-200 px-3 py-2 text-center text-xs font-semibold uppercase text-slate-500 min-w-[70px]">{s}</th>)}
+                                                    {sizes.map(s => <th key={s} className="border-r border-b border-slate-200 px-3 py-2 text-center text-xs font-semibold uppercase text-slate-500 min-w-[78px]">{s}</th>)}
                                                     <th className="border-b border-slate-200 px-3 py-2 text-center text-xs font-semibold uppercase text-slate-500">Total</th>
                                                 </tr>
                                             </thead>
@@ -294,7 +407,7 @@ export default function LotFormPage() {
                                                         {sizes.map((sz, c) => (
                                                             <td key={sz} className="border-r border-b border-slate-200 p-0">
                                                                 <input type="text" inputMode="numeric" autoComplete="off" className="excel-input w-full text-center"
-                                                                    aria-label={`${color} size ${sz} quantity`}
+                                                                    aria-label={`${color} size ${sz} ordered quantity`}
                                                                     ref={el => { cellRefs.current[`${r}:${c}`] = el; }}
                                                                     value={colorSizeQty[color]?.[sz] ?? ''}
                                                                     onChange={e => updateQty(color, sz, e.target.value)}
@@ -302,17 +415,31 @@ export default function LotFormPage() {
                                                                     onKeyDown={e => onCellKeyDown(e, r, c)}
                                                                     onPaste={e => onCellPaste(e, r, c)}
                                                                     data-testid={`qty-${color}-${sz}`} />
+                                                                {hasAllowance && orderOf(color, sz) > 0 && (
+                                                                    <span className="block pb-0.5 text-center text-[10px] text-slate-400" data-testid={`plan-${color}-${sz}`}>
+                                                                        plan {planOf(color, sz)}
+                                                                    </span>
+                                                                )}
                                                             </td>
                                                         ))}
-                                                        <td className="border-b border-slate-200 px-3 py-1.5 text-center font-mono font-semibold text-slate-700">{rowTotal(color)}</td>
+                                                        <td className="border-b border-slate-200 px-3 py-1.5 text-center font-mono font-semibold text-slate-700">
+                                                            {rowOrder(color)}{hasAllowance && <span className="block text-[10px] font-normal text-slate-400">plan {rowPlan(color)}</span>}
+                                                        </td>
                                                     </tr>
                                                 ))}
                                             </tbody>
                                             <tfoot>
                                                 <tr className="bg-slate-50 font-mono font-semibold text-slate-700">
                                                     <td className="sticky left-0 z-10 bg-slate-50 border-r border-slate-200 px-3 py-1.5 font-sans text-xs uppercase text-slate-500">Total</td>
-                                                    {sizes.map(sz => <td key={sz} className="border-r border-slate-200 px-3 py-1.5 text-center">{colTotal(sz)}</td>)}
-                                                    <td className="px-3 py-1.5 text-center text-brand" data-testid="grid-grand-total">{totalPlanned}</td>
+                                                    {sizes.map(sz => (
+                                                        <td key={sz} className="border-r border-slate-200 px-3 py-1.5 text-center">
+                                                            {colOrder(sz)}{hasAllowance && <span className="block text-[10px] font-normal text-slate-400">plan {colPlan(sz)}</span>}
+                                                        </td>
+                                                    ))}
+                                                    <td className="px-3 py-1.5 text-center text-brand" data-testid="grid-grand-total">
+                                                        {hasAllowance ? totalPlanned : totalOrder}
+                                                        {hasAllowance && <span className="block text-[10px] font-normal text-slate-400">order {totalOrder}</span>}
+                                                    </td>
                                                 </tr>
                                             </tfoot>
                                         </table>
@@ -328,27 +455,89 @@ export default function LotFormPage() {
                         <CardHeader className="pb-3"><CardTitle className="text-base font-outfit">Process & Rate Setup</CardTitle></CardHeader>
                         <CardContent className="space-y-3">
                             {lotOps.map((op, oi) => (
-                                <div key={op.uid} className="flex flex-wrap items-center gap-3 border border-slate-200 rounded-lg p-3 bg-slate-50/50">
-                                    <select className={`${selectCls} min-w-[200px] flex-1`} value={op.operation_id}
-                                        onChange={e => updateOp(op.uid, 'operation_id', e.target.value)}
-                                        aria-label={`Operation ${oi + 1}`} data-testid={`op-select-${oi}`}>
-                                        <option value="">Select operation</option>
-                                        {operationOptions.map(([group, list]) => (
-                                            <optgroup key={group || 'none'} label={group || 'No group'}>
-                                                {list.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-                                            </optgroup>
-                                        ))}
-                                    </select>
-                                    <div className="flex items-center gap-1">
-                                        <span className="text-xs text-slate-500">Rate:</span>
-                                        <Input type="text" inputMode="decimal" value={op.rate}
-                                            onChange={e => updateOp(op.uid, 'rate', e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1'))}
-                                            placeholder="0.00" className="w-24 bg-white font-mono" data-testid={`op-rate-${oi}`} aria-label={`Rate for operation ${oi + 1}`} />
+                                <div key={op.uid} className="space-y-2 border border-slate-200 rounded-lg p-3 bg-slate-50/50">
+                                    <div className="flex flex-wrap items-center gap-3">
+                                        <select className={`${selectCls} min-w-[200px] flex-1`} value={op.operation_id}
+                                            onChange={e => updateOp(op.uid, 'operation_id', e.target.value)}
+                                            aria-label={`Operation ${oi + 1}`} data-testid={`op-select-${oi}`}>
+                                            <option value="">Select operation</option>
+                                            {operationOptions.map(([group, list]) => (
+                                                <optgroup key={group || 'none'} label={group || 'No group'}>
+                                                    {list.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                                                </optgroup>
+                                            ))}
+                                        </select>
+                                        <Button variant="ghost" size="sm" onClick={() => removeOp(op.uid)} className="text-red-500" aria-label={`Remove operation ${oi + 1}`}><Trash2 size={14} /></Button>
                                     </div>
-                                    <Button variant="ghost" size="sm" onClick={() => removeOp(op.uid)} className="text-red-500" aria-label={`Remove operation ${oi + 1}`}><Trash2 size={14} /></Button>
+                                    <RateEditor label={defaultType?.name || 'Regular'} testid={`op-${oi}`}
+                                        rate={op.rate} onRate={v => updateOp(op.uid, 'rate', v)}
+                                        useSizes={op.useSizes} onUseSizes={v => updateOp(op.uid, 'useSizes', v)}
+                                        sizeRates={op.sizeRates} onSizeRate={(sz, v) => setSizeRate(op.uid, sz, v)} sizes={sizes} />
+                                    {otherTypes.length > 0 && (
+                                        <div className="space-y-2">
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <span className="text-[11px] text-slate-500">Also pay at:</span>
+                                                {otherTypes.map(t => (
+                                                    <button key={t.id} type="button" aria-pressed={t.id in op.extras} onClick={() => toggleExtra(op.uid, t.id)}
+                                                        data-testid={`op-${oi}-extra-${t.name}`}
+                                                        className={`cursor-pointer rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset
+                                                            ${t.id in op.extras ? 'bg-brand text-white ring-brand' : 'bg-white text-slate-600 ring-slate-200 hover:bg-slate-100'}`}>
+                                                        {t.name}{!t.counts_toward_plan && ' (not in plan)'}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            {otherTypes.filter(t => t.id in op.extras).map(t => (
+                                                <RateEditor key={t.id} label={t.name} testid={`op-${oi}-${t.name}`}
+                                                    rate={op.extras[t.id].rate} onRate={v => patchExtra(op.uid, t.id, { rate: v })}
+                                                    useSizes={op.extras[t.id].useSizes} onUseSizes={v => patchExtra(op.uid, t.id, { useSizes: v })}
+                                                    sizeRates={op.extras[t.id].sizeRates}
+                                                    onSizeRate={(sz, v) => patchExtra(op.uid, t.id, { sizeRates: { ...op.extras[t.id].sizeRates, [sz]: v } })} sizes={sizes} />
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                             ))}
                             <Button variant="outline" onClick={addOp} className="gap-1.5" data-testid="add-operation-button"><Plus size={14} /> Add Operation</Button>
+                        </CardContent>
+                    </Card>
+
+                    <Card className="mt-4 border-slate-200" data-testid="quantity-control-card">
+                        <CardHeader className="pb-3"><CardTitle className="text-base font-outfit">Quantity control</CardTitle></CardHeader>
+                        <CardContent className="space-y-3">
+                            <p className="text-xs text-slate-500">
+                                By default nobody can enter more than the plan. You can allow a small extra, but only with an administrator's approval.
+                            </p>
+                            <div className="flex flex-wrap gap-4">
+                                <div>
+                                    <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Over-production allowed with approval (%)</Label>
+                                    <Input type="text" inputMode="decimal" value={qc.over_tolerance_pct} placeholder="0 = never"
+                                        onChange={e => setQc({ ...qc, over_tolerance_pct: rateText(e.target.value) })}
+                                        className="mt-1 w-32 font-mono" data-testid="qc-tolerance" />
+                                </div>
+                                <div>
+                                    <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Warn when a size reaches (%)</Label>
+                                    <Input type="text" inputMode="decimal" value={qc.warn_at_pct}
+                                        onChange={e => setQc({ ...qc, warn_at_pct: rateText(e.target.value) })}
+                                        className="mt-1 w-32 font-mono" data-testid="qc-warn" />
+                                </div>
+                            </div>
+                            {isEdit && selectedColors.length > 0 && sizes.length > 0 && (
+                                <div>
+                                    <p className="mb-1 flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-slate-500"><Lock size={12} /> Lock a size to stop further entries</p>
+                                    <div className="flex flex-wrap gap-2" data-testid="qc-locks">
+                                        {selectedColors.flatMap(c => sizes.map(sz => {
+                                            const on = !!qc.locked[`${c}|${sz}`];
+                                            return (
+                                                <button key={`${c}|${sz}`} type="button" aria-pressed={on} onClick={() => toggleLock(c, sz)}
+                                                    data-testid={`lock-${c}-${sz}`}
+                                                    className={`cursor-pointer rounded-md px-2 py-1 text-[11px] font-medium ring-1 ring-inset ${on ? 'bg-rose-50 text-rose-700 ring-rose-200' : 'bg-white text-slate-600 ring-slate-200 hover:bg-slate-100'}`}>
+                                                    {on && <Lock size={10} className="mr-1 inline" />}{c} · {sz}
+                                                </button>
+                                            );
+                                        }))}
+                                    </div>
+                                </div>
+                            )}
                         </CardContent>
                     </Card>
                 </TabsContent>

@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import {
     LayoutDashboard, Users, Scissors, Package, Palette, Ruler,
     ClipboardList, IndianRupee, FileBarChart, Receipt,
-    Settings, LogOut, Menu, X, UserCog, CalendarDays, Wallet, Bell, Check, History, ShieldCheck
+    Settings, LogOut, Menu, X, UserCog, CalendarDays, Wallet, Bell, Check, History, ShieldCheck, Coins
 } from 'lucide-react';
 
 /** Grouped so a 14-item sidebar reads as four short lists instead of one wall. */
@@ -42,6 +42,7 @@ const navGroups = [
             { path: '/operations', label: 'Operations', icon: Scissors, roles: ['admin'] },
             { path: '/colors', label: 'Colors', icon: Palette, roles: ['admin'] },
             { path: '/size-charts', label: 'Size Charts', icon: Ruler, roles: ['admin'] },
+            { path: '/rate-types', label: 'Rate types', icon: Coins, roles: ['admin'] },
         ],
     },
     {

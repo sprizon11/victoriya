@@ -671,18 +671,38 @@ async def enrich_lot(lot):
     lot["non_plan_cost"] = round(non_plan_cost, 2)
     return lot
 
+def hide_money_from_lot(lot):
+    """Data-entry staff pick a lot, operation and colour to record output, but they must
+    never see what anything pays. Names, sizes, quantities and progress stay; every rate,
+    rate card and labour cost is removed."""
+    for op in lot.get("operations", []):
+        op.pop("rate", None)
+        op.pop("size_rates", None)
+        op["rates"] = [{"rate_type_id": r.get("rate_type_id"), "rate_type_name": r.get("rate_type_name")}
+                       for r in op.get("rates", [])]
+    for prog in lot.get("operation_progress", []):
+        prog.pop("rate", None)
+        prog.pop("cost", None)
+    lot.pop("total_labour_cost", None)
+    lot.pop("non_plan_cost", None)
+    return lot
+
+
 @api_router.get("/lots")
 async def get_lots(request: Request, status: Optional[str] = None):
     user = await get_current_user(request)
-    check_role(user, ["admin", "accounts"])
-    check_permission(user, "can_view_financial")
-    query = {"status": status} if status else {}
+    check_role(user, ["admin", "accounts", "data_entry"])
+    clerk = user["role"] == "data_entry"
+    if not clerk:
+        check_permission(user, "can_view_financial")
+    # a data-entry user only ever needs the lots that are open for entry
+    query = {"status": "active"} if clerk else ({"status": status} if status else {})
     lots = await db.lots.find(query).sort("lot_number", -1).to_list(1000)
     result = []
     for lot in lots:
         lot = serialize_doc(lot)
         lot = await enrich_lot(lot)
-        result.append(lot)
+        result.append(hide_money_from_lot(lot) if clerk else lot)
     return result
 
 @api_router.post("/lots")
@@ -715,12 +735,13 @@ async def create_lot(data: LotCreate, request: Request):
 
 @api_router.get("/lots/{lot_id}")
 async def get_lot(lot_id: str, request: Request):
-    await get_current_user(request)
+    user = await get_current_user(request)
     lot = await db.lots.find_one({"_id": ObjectId(lot_id)})
     if not lot:
         raise HTTPException(404, "Lot not found")
     lot = serialize_doc(lot)
-    return await enrich_lot(lot)
+    lot = await enrich_lot(lot)
+    return hide_money_from_lot(lot) if user["role"] == "data_entry" else lot
 
 def plan_qty(value) -> int:
     """A grid cell as a whole, non-negative number of pieces. The lot form sends

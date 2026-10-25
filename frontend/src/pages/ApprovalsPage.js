@@ -45,6 +45,17 @@ function Change({ item }) {
             </div>
         );
     }
+    if (item.type === 'quantity_override') {
+        const b = item.payload || {};
+        const pieces = (b.entries || []).reduce((t, e) => t + Object.values(e.sizes || {}).reduce((a, n) => a + (+n || 0), 0), 0);
+        return (
+            <div className="rounded-md bg-amber-50/70 p-2.5" data-testid={`approval-change-${item.id}`}>
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-700">Pieces beyond the plan, waiting to be recorded</p>
+                <p className="tnum text-[13px] text-slate-800">{pieces} pcs on {b.date}</p>
+                <p className="text-[11px] text-slate-500">Nothing is saved until you approve.</p>
+            </div>
+        );
+    }
     if (item.auto && (item.payload?.before || item.payload?.after)) {
         return (
             <div className="grid gap-2 sm:grid-cols-2 text-[11.5px]">
