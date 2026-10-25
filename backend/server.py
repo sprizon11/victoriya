@@ -11,7 +11,7 @@ import secrets
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Query
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import StreamingResponse, FileResponse, PlainTextResponse, Response as FastAPIResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -2713,6 +2713,33 @@ if (FRONTEND_BUILD_DIR / "index.html").exists():
         StaticFiles(directory=FRONTEND_BUILD_DIR / "static"),
         name="static",
     )
+
+    def public_origin(request: Request) -> str:
+        """Use the incoming domain so a later Render custom domain needs no sitemap edit."""
+        host = request.headers.get("x-forwarded-host") or request.headers.get("host", "")
+        host = host.split(",", 1)[0].strip().lower()
+        if not host or not all(ch.isalnum() or ch in ".:-" for ch in host):
+            raise HTTPException(400, "Invalid host")
+        scheme = (request.headers.get("x-forwarded-proto") or request.url.scheme).split(",", 1)[0].strip().lower()
+        if scheme not in ("http", "https"):
+            raise HTTPException(400, "Invalid scheme")
+        return f"{scheme}://{host}"
+
+    @app.get("/sitemap.xml", include_in_schema=False)
+    async def public_sitemap(request: Request):
+        from html import escape
+        url = escape(public_origin(request) + "/home", quote=True)
+        return FastAPIResponse(f'<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>{url}</loc></url></urlset>', media_type="application/xml")
+
+    @app.get("/robots.txt", include_in_schema=False)
+    async def public_robots(request: Request):
+        paths = ["login", "api/", "lots", "production", "weeks", "approvals", "stock",
+                 "purchase-orders", "salary", "advances", "payroll", "vouchers",
+                 "expenses", "reports", "operators", "operations", "colors", "size-charts",
+                 "rate-types", "users", "enquiries", "audit", "settings", "year-end"]
+        body = "User-agent: *\n" + "".join(f"Disallow: /{path}\n" for path in paths)
+        body += f"Allow: /\nAllow: /home\nSitemap: {public_origin(request)}/sitemap.xml\n"
+        return PlainTextResponse(body)
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str):

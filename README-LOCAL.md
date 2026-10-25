@@ -291,3 +291,24 @@ Install test-only dependencies with `backend\.venv\Scripts\python.exe -m pip ins
 Run `backend\.venv\Scripts\python.exe backend/test_enquiries.py` alongside the main
 regression suite. These tests create and remove only their own enquiry/user
 fixtures, and preserve the prior local quota and notification read states.
+
+## Landing page v2
+
+The public page now uses the official vector logo and blue theme. The logged-out root
+and `/home` show the public page; staff links keep their existing routing. The
+public enquiry endpoint and its five-per-IP hourly quota are unchanged. Product
+images are illustrative and not photos of the unit or its product catalogue.
+
+Copy, contact details and all withheld business facts live in
+`frontend/src/landing/content.js`. Empty arrays hide the corresponding sections.
+`canonicalUrl` may be set to a confirmed full HTTPS origin; if it is empty,
+`REACT_APP_SITE_URL` can supply that origin at frontend build time. Until one is set,
+the canonical and absolute social-image tags are omitted. The API generates
+`/robots.txt` and `/sitemap.xml` from the incoming host, including a later custom
+domain, and lists only `/home` in the sitemap.
+
+Image variants can be rebuilt with `scripts/landing_assets_v2.py`. Its Pillow and
+CairoSVG packages are needed only to generate assets; the deployed application
+has no new runtime dependency. The landing render test is in
+`frontend/src/landing/LandingPage.test.js`, and the SEO route test is
+`backend/test_public_seo.py`.

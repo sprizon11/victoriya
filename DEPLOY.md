@@ -307,3 +307,13 @@ its sends. Use an outside timer instead. It also keeps the app awake while it ru
    The app decides what is due (Indian time, 08:00 or later), sends each report once per period, and
    records every attempt under "Recent sends". Calling it more often than needed is harmless.
 4. A later move to Cloudflare could use a Cron Trigger for the same call.
+
+## Custom domain for the public landing page
+
+In Render, add the chosen domain to the existing web service. Create the DNS records
+shown by Render at the domain registrar and wait for Render's TLS certificate to
+become active. Set `canonicalUrl` in `frontend/src/landing/content.js` to the
+confirmed HTTPS origin, or set `REACT_APP_SITE_URL` to that origin for the frontend
+build, then redeploy. No Dockerfile, service or database migration is required.
+The generated `/robots.txt` and `/sitemap.xml` use the incoming host and update
+automatically when the domain changes. Direct staff URLs remain on the same origin.
