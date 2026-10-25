@@ -14,7 +14,7 @@ export const content = {
   // TODO(owner): supply confirmed certifications, clients, export markets, real photos and testimonials before displaying those sections.
   certifications: [], clients: [], markets: [], gallery: [], testimonials: [],
   // TODO(owner): confirm the suggested buyer journey below is how orders really begin.
-  nav: [['about', 'About'], ['collection', 'What we make'], ['process', 'Our process'], ['gallery', 'Gallery'], ['contact', 'Contact']],
+  nav: [['about', 'About'], ['collection', 'What we make'], ['brands', 'Our brands'], ['process', 'Our process'], ['gallery', 'Gallery'], ['contact', 'Contact']],
   quote: 'Request a quote', skip: 'Skip to content', menu: 'Menu', closeMenu: 'Close menu',
   eyebrow: 'VICTORIA GARMENTS · TIRUPPUR', headline: 'Thoughtfully made.\nReady to wear.',
   intro: 'Men’s and women’s wear, made in Tiruppur. Let’s talk about your next garment order.',
@@ -100,4 +100,13 @@ export const content = {
   successTitle: 'Enquiry received', successNote: 'We will get back to you by phone or email.', again: 'Send another enquiry',
   footerCtaTitle: 'Ready when you are.', footerCtaText: 'Share your garment requirements and we will get in touch.',
   footerExplore: 'Explore', footerContact: 'Get in touch', backToTop: 'Back to top',
+  contactImageAlt: 'Illustrative close-up of a collar and stitching on a plain garment', privacyShort: 'Used only to reply to this enquiry.',
+  brandsLabel: 'OUR BRANDS', brandsTitle: 'Two brands.\nOne home.',
+  brandsIntro: 'Victoria Garments is the home of two garment brands, Victoria and Pro Track. Ask us about either one.',
+  // TODO(owner): add a short description of what each brand makes and who it is for (no claims until confirmed).
+  brands: [
+    { name: 'Victoria', tagline: 'Irresistible Fashion', image: 'brand-victoria', alt: 'Victoria brand logo: dark blue wordmark on a teal background' },
+    { name: 'Pro Track', tagline: 'Power of Fashion', image: 'brand-protrack', alt: 'Pro Track brand logo: white wordmark with an orange flame mark on a dark blue background' },
+  ],
+  brandAction: 'Ask about this brand',
 };
