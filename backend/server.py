@@ -15,7 +15,7 @@ from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
 import bcrypt
@@ -1065,30 +1065,112 @@ async def edit_production(entry_id: str, request: Request):
     })
     return {"message": "Entry updated", "audit": audit}
 
+# ===== PUBLIC ENQUIRIES =====
+
+class EnquiryCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    company: str = Field(default="", max_length=150)
+    email: str = Field(max_length=254, pattern=r"^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$")
+    phone: str = Field(default="", max_length=40)
+    message: str = Field(min_length=1, max_length=1500)
+    website: str = Field(default="", max_length=200)
+
+    @field_validator("name", "company", "email", "phone", "message")
+    @classmethod
+    def plain_text(cls, value):
+        value = value.strip()
+        # Reject markup instead of storing it for a future email renderer to interpret.
+        if "<" in value or ">" in value:
+            raise ValueError("Use plain text without HTML")
+        return value
+
+    @field_validator("name", "message")
+    @classmethod
+    def not_blank(cls, value):
+        if not value:
+            raise ValueError("This field is required")
+        return value
+
+
+class EnquiryStatus(BaseModel):
+    status: str = Field(pattern="^(new|handled)$")
+
+
+@api_router.post("/public/enquiry")
+async def submit_enquiry(data: EnquiryCreate, request: Request):
+    reply = {"message": "Thank you. Your enquiry has been received."}
+    if data.website:
+        return reply
+    now = datetime.now(timezone.utc)
+    ip = request.client.host if request.client else "unknown"
+    key = f"enquiry:{ip}"
+    # A single atomic update makes simultaneous submissions share the same quota.
+    limit = await db.rate_limits.find_one_and_update(
+        {"_id": key}, [{"$set": {
+            "count": {"$cond": [{"$gt": ["$expires_at", now]}, {"$add": ["$count", 1]}, 1]},
+            "expires_at": {"$cond": [{"$gt": ["$expires_at", now]}, "$expires_at", now + timedelta(hours=1)]},
+        }}], upsert=True, return_document=True)
+    if limit["count"] > 5:
+        raise HTTPException(429, "Too many enquiries. Please try again later.", headers={"Retry-After": "3600"})
+    doc = data.model_dump(exclude={"website"})
+    doc.update(created_at=now.isoformat(), ip=ip,
+               user_agent=request.headers.get("user-agent", "")[:300], status="new")
+    result = await db.enquiries.insert_one(doc)
+    await db.notifications.insert_one({"type": "enquiry", "enquiry_id": str(result.inserted_id),
+        "audience": "admin", "message": "New website enquiry — open Enquiries to review.",
+        "read": False, "created_at": now.isoformat()})
+    return reply
+
+
+@api_router.get("/enquiries")
+async def get_enquiries(request: Request, skip: int = Query(0, ge=0)):
+    user = await get_current_user(request)
+    check_role(user, ["admin"])
+    docs = await db.enquiries.find({}, {"ip": 0, "user_agent": 0}).sort("created_at", -1).skip(skip).to_list(50)
+    return {"items": [serialize_doc(d) for d in docs], "total": await db.enquiries.count_documents({})}
+
+
+@api_router.put("/enquiries/{enquiry_id}")
+async def update_enquiry(enquiry_id: str, data: EnquiryStatus, request: Request):
+    user = await get_current_user(request)
+    check_role(user, ["admin"])
+    if not ObjectId.is_valid(enquiry_id):
+        raise HTTPException(404, "Enquiry not found")
+    result = await db.enquiries.update_one({"_id": ObjectId(enquiry_id)}, {"$set": {
+        "status": data.status, "updated_by": user["id"], "updated_at": datetime.now(timezone.utc).isoformat()}})
+    if not result.matched_count:
+        raise HTTPException(404, "Enquiry not found")
+    await db.notifications.update_many({"enquiry_id": enquiry_id}, {"$set": {"read": data.status == "handled"}})
+    return {"status": data.status}
+
+
+def notification_scope(user):
+    return {} if user["role"] == "admin" else {"audience": {"$ne": "admin"}}
+
 # ===== NOTIFICATION ROUTES =====
 
 @api_router.get("/notifications")
 async def get_notifications(request: Request):
-    await get_current_user(request)
-    notifications = await db.notifications.find().sort("created_at", -1).to_list(50)
+    user = await get_current_user(request)
+    notifications = await db.notifications.find(notification_scope(user)).sort("created_at", -1).to_list(50)
     return [serialize_doc(n) for n in notifications]
 
 @api_router.put("/notifications/read-all")
 async def mark_all_read(request: Request):
-    await get_current_user(request)
-    await db.notifications.update_many({"read": False}, {"$set": {"read": True}})
+    user = await get_current_user(request)
+    await db.notifications.update_many({**notification_scope(user), "read": False}, {"$set": {"read": True}})
     return {"message": "All marked read"}
 
 @api_router.delete("/notifications/clear-all")
 async def clear_all_notifications(request: Request):
-    await get_current_user(request)
-    await db.notifications.delete_many({})
+    user = await get_current_user(request)
+    await db.notifications.delete_many(notification_scope(user))
     return {"message": "All cleared"}
 
 @api_router.put("/notifications/{notif_id}/toggle")
 async def toggle_notification(notif_id: str, request: Request):
-    await get_current_user(request)
-    notif = await db.notifications.find_one({"_id": ObjectId(notif_id)})
+    user = await get_current_user(request)
+    notif = await db.notifications.find_one({**notification_scope(user), "_id": ObjectId(notif_id)})
     if not notif:
         raise HTTPException(404)
     await db.notifications.update_one({"_id": ObjectId(notif_id)}, {"$set": {"read": not notif.get("read", False)}})
@@ -1096,8 +1178,8 @@ async def toggle_notification(notif_id: str, request: Request):
 
 @api_router.get("/notifications/unread-count")
 async def unread_count(request: Request):
-    await get_current_user(request)
-    count = await db.notifications.count_documents({"read": False})
+    user = await get_current_user(request)
+    count = await db.notifications.count_documents({**notification_scope(user), "read": False})
     return {"count": count}
 
 # ===== ADVANCE ROUTES =====
@@ -1959,7 +2041,8 @@ async def reset_all_data(request: Request):
         raise HTTPException(400, "Type 'RESET ALL DATA' to confirm")
     collections_to_clear = ["operators", "operations", "colors_master", "size_charts",
                             "weeks", "lots", "production_entries", "advances",
-                            "notifications", "edit_requests", "counters", "system_settings", "login_attempts"]
+                            "notifications", "edit_requests", "counters", "system_settings", "login_attempts",
+                            "enquiries", "rate_limits"]
     cleared = []
     for col in collections_to_clear:
         await db[col].drop()
@@ -2088,6 +2171,8 @@ async def seed_settings():
 async def startup():
     await db.users.create_index("email", unique=True)
     await db.login_attempts.create_index("identifier")
+    await db.rate_limits.create_index("expires_at", expireAfterSeconds=0)
+    await db.enquiries.create_index("created_at")
     await db.production_entries.create_index([("week_number", 1), ("year", 1)])
     await db.production_entries.create_index("lot_id")
     await db.production_entries.create_index("operator_id")
