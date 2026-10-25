@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import api from '../lib/api';
+import { localDate } from '../lib/utils';
 import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -25,7 +26,7 @@ export default function AdvancesPage() {
     const [operators, setOperators] = useState([]);
     const [dialogOpen, setDialogOpen] = useState(false);
     const [voucherPreview, setVoucherPreview] = useState(null);
-    const [form, setForm] = useState({ operator_id: '', date: new Date().toISOString().split('T')[0], amount: '', remarks: '' });
+    const [form, setForm] = useState({ operator_id: '', date: localDate(), amount: '', remarks: '' });
     const [filterOp, setFilterOp] = useState('all');
 
     const load = () => {
@@ -40,7 +41,7 @@ export default function AdvancesPage() {
         try {
             await api.post('/advances', { ...form, amount: parseFloat(form.amount) });
             toast.success('Advance recorded');
-            setDialogOpen(false); setForm({ operator_id: '', date: new Date().toISOString().split('T')[0], amount: '', remarks: '' }); load();
+            setDialogOpen(false); setForm({ operator_id: '', date: localDate(), amount: '', remarks: '' }); load();
         } catch (err) { toast.error(err.response?.data?.detail || 'Error'); }
     };
 
@@ -121,7 +122,7 @@ export default function AdvancesPage() {
                                             <Button variant="ghost" size="sm" onClick={() => setVoucherPreview(a)} className="text-blue-600 gap-1 text-[10px] h-6" data-testid={`view-adv-${a.id}`}>
                                                 <Eye size={11} /> View
                                             </Button>
-                                            <Button variant="ghost" size="sm" onClick={() => handleDelete(a.id)} className="text-red-500" data-testid={`delete-adv-${a.id}`}>
+                                            <Button variant="ghost" size="sm" aria-label={`Delete advance ${a.voucher_number}`} onClick={() => handleDelete(a.id)} className="text-red-500" data-testid={`delete-adv-${a.id}`}>
                                                 <Trash2 size={14} />
                                             </Button>
                                         </div>

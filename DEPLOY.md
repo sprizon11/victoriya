@@ -286,3 +286,24 @@ Put a reverse proxy (Caddy or nginx) in front for HTTPS. Without HTTPS, set
 | `COOKIE_SECURE` | no | Follows `PUBLIC_MODE` unless set |
 | `FRONTEND_BUILD_DIR` | no | Where the React build lives |
 | `PORT` | no | Injected by Render |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_STARTTLS` | no | Email reports. Leave `SMTP_HOST` empty and the app simply says email is off. Use an app password, never the mailbox login password. |
+| `CRON_TOKEN` | for scheduled email | Long random value; the outside timer must send it (see below) |
+
+
+---
+
+## Scheduled emails (the free plan sleeps)
+
+On Render's free plan the service goes to sleep when idle, so a timer *inside* the app would silently miss
+its sends. Use an outside timer instead. It also keeps the app awake while it runs.
+
+1. Set `CRON_TOKEN` (Render's `render.yaml` generates one) and the `SMTP_*` variables above.
+2. In **Settings, Email reports**, switch on the reports you want and add recipients. "Send test" proves the
+   mailbox details are right.
+3. Create a free job at cron-job.org (or a Render Cron Job) that sends a `POST` every 15 minutes to
+
+   `https://<your-app>.onrender.com/api/jobs/run?token=<CRON_TOKEN>`
+
+   The app decides what is due (Indian time, 08:00 or later), sends each report once per period, and
+   records every attempt under "Recent sends". Calling it more often than needed is harmless.
+4. A later move to Cloudflare could use a Cron Trigger for the same call.

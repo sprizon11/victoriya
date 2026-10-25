@@ -85,8 +85,8 @@ export default function ColorsPage() {
                                 </TableCell>
                                 <TableCell className="text-right">
                                     <div className="flex justify-end gap-1">
-                                        <Button variant="ghost" size="sm" onClick={() => { setEditing(c); setName(c.name); setDialogOpen(true); }}><Pencil size={14} /></Button>
-                                        <Button variant="ghost" size="sm" onClick={() => handleDelete(c.id)} className="text-red-500"><Trash2 size={14} /></Button>
+                                        <Button variant="ghost" size="sm" aria-label={`Edit ${c.name}`} onClick={() => { setEditing(c); setName(c.name); setDialogOpen(true); }}><Pencil size={14} /></Button>
+                                        <Button variant="ghost" size="sm" aria-label={`Delete ${c.name}`} onClick={() => handleDelete(c.id)} className="text-red-500"><Trash2 size={14} /></Button>
                                     </div>
                                 </TableCell>
                             </TableRow>

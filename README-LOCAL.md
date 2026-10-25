@@ -183,7 +183,15 @@ backend\.venv\Scripts\python.exe backend\test_enquiries.py
 backend\.venv\Scripts\python.exe backend\test_audit.py
 backend\.venv\Scripts\python.exe backend\test_approvals.py
 backend\.venv\Scripts\python.exe backend\test_groups.py
+backend\.venv\Scripts\python.exe backend\test_lotmath.py
+backend\.venv\Scripts\python.exe backend\test_phase3.py
+backend\.venv\Scripts\python.exe backend\test_phase4.py
+backend\.venv\Scripts\python.exe backend\test_phase5.py
+backend\.venv\Scripts\python.exe backend\test_phase6.py
 ```
+
+`test_phase5.py` needs the dev-only test tools (`pip install -r backend\requirements-dev.txt`) and a
+`CRON_TOKEN` in `backend\.env`. Frontend: `cd frontend; npm test`.
 
 Each cleans up the records it creates (audit and approval history are kept on purpose).
 

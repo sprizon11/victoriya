@@ -80,7 +80,7 @@ export default function WeeksPage() {
                                         <TableCell className="text-sm">{w.start_date}</TableCell>
                                         <TableCell className="text-sm">{w.end_date}</TableCell>
                                         <TableCell className="text-right">
-                                            <Button variant="ghost" size="sm" onClick={() => handleDelete(w.id)} className="text-red-500"><Trash2 size={14} /></Button>
+                                            <Button variant="ghost" size="sm" aria-label={`Delete week ${w.week_number}`} onClick={() => handleDelete(w.id)} className="text-red-500"><Trash2 size={14} /></Button>
                                         </TableCell>
                                     </TableRow>
                                 ))}

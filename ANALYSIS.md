@@ -318,3 +318,22 @@ cell no longer returns a 500.
 
 Advance types are **deferred** (the owner will supply a reference image); advances and payroll
 deductions are unchanged.
+
+
+---
+
+## 9. Added in Phases 3 to 6
+
+| Area | Collections / modules | Notes |
+|---|---|---|
+| Lot quantities | `lots.colors[].sizes[]` gain `order_qty` beside `planned_qty`; `lots.allowance_pct`; `backend/lotmath.py` | Planned = ordered plus allowance, rounded **half-up per cell** in exact integer maths. Every older control still reads `planned_qty`. |
+| Rates | `rate_types` (Regular/Sample/Rework); `lots.operations[].rates[]` with optional per-size rates; entries snapshot `rate_flat`, `size_rates`, `rate_type_*`, `counts_toward_plan` | `compute_earnings()` is the only place pay is computed. Sample/Rework are paid but not counted as produced. |
+| Quantity control | `lots.quantity_control` {over_tolerance_pct, warn_at_pct, locked} | Over-plan inside the tolerance returns 409 and becomes a `quantity_override` approval. |
+| Stock | `stock_items`, `suppliers`, `stock_movements` (append-only; reversals have `sign: -1`) | Balances are derived. Two-unit items (cone + kg) carry `qty` and `qty2`. Issues are valued at weighted-average cost when they move. |
+| Purchasing | `purchase_orders`; `lots.requirements[]`, `lots.post_pct` | Drafted from requirements, never sent automatically; release is the `po_release` approval. |
+| Expenses | `expense_categories`, `expenses`, GridFS bucket `bills` | Bills are voided, not deleted; bills charged to a lot feed its costing. |
+| Lifecycle | `lot_closures` (immutable, versioned), `lots.fy`, `carried_from/to_lot_id` | Close runs a checklist and freezes a report. Year-end wizard closes or carries forward (idempotent). |
+| Email | `system_settings.email_reports`, `email_log`, `scheduler_state` | SMTP from environment only; one send per report per period. |
+| Dashboard / DNA | `backend/dashboard.py`, `backend/dna.py` | One aggregated payload per role; DNA code is an HMAC of the lot id. |
+
+See `docs/QA-REPORT.md` for what was tested and what was not.

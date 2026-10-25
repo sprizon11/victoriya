@@ -1,5 +1,9 @@
 # Codex build plan — Victoria Unit Flow
 
+> **Status (end of Phase 6):** Phases 1 to 6 are built, tested and committed locally. Advance types (the
+> owner's separate "Salary" option) and the Cloudflare move are the only items left from this plan. See
+> `docs/QA-REPORT.md` for results and for what was *not* checked.
+
 Start with `/AGENTS.md` (rules, commands, definition of done). Then do the phases
 **in order**; each file is self-contained. Do not start a phase until the previous
 one is merged and `test_api.py` is green.

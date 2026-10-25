@@ -56,6 +56,11 @@ async def label_for(request, collection, oid, field="name", entity_type=None):
              summary=f"{request.method} {entity_type or ''} {doc.get(field, '')}".strip())
     return doc
 
+# Upper bound for rows read into memory by a report or payroll query. It used to be 10,000, which
+# would silently drop entries (and so underpay) once a unit had enough history; raise it here
+# if a database ever gets near it.
+MAX_ROWS = 200_000
+
 app = FastAPI(
     title="Victoria Unit Flow",
     docs_url=None if PUBLIC_MODE else "/docs",   # don't advertise the API surface publicly
@@ -979,7 +984,7 @@ async def get_production(request: Request, lot_id: Optional[str] = None, week_id
     if date_from and date_to: query["date"] = {"$gte": date_from, "$lte": date_to}
     elif date_from: query["date"] = {"$gte": date_from}
     elif date_to: query["date"] = {"$lte": date_to}
-    entries = await db.production_entries.find(query).sort("created_at", -1).to_list(10000)
+    entries = await db.production_entries.find(query).sort("created_at", -1).to_list(MAX_ROWS)
     result = [serialize_doc(e) for e in entries]
     if user.get("role") == "data_entry":
         for e in result:
@@ -998,7 +1003,7 @@ async def get_lot_tracking(lot_id: str, request: Request, operation_id: Optional
     query = {"lot_id": lot_id, "counts_toward_plan": {"$ne": False}}
     if operation_id:
         query["operation_id"] = operation_id
-    entries = await db.production_entries.find(query).to_list(10000)
+    entries = await db.production_entries.find(query).to_list(MAX_ROWS)
     produced = {}
     for e in entries:
         color = e.get("color", "")
@@ -1054,7 +1059,7 @@ async def assert_within_plan(lot, color, operation_id, add_qty, exclude_entry_id
              "color": color, "operation_id": operation_id, "counts_toward_plan": {"$ne": False}}
     if exclude_entry_id:
         query["_id"] = {"$ne": ObjectId(exclude_entry_id)}
-    existing = await db.production_entries.find(query).to_list(10000)
+    existing = await db.production_entries.find(query).to_list(MAX_ROWS)
 
     existing_qty = {}
     for e in existing:
@@ -1563,7 +1568,7 @@ async def get_advances(request: Request, operator_id: Optional[str] = None, stat
     query = {}
     if operator_id: query["operator_id"] = operator_id
     if status: query["status"] = status
-    advances = await db.advances.find(query).sort("date", -1).to_list(1000)
+    advances = await db.advances.find(query).sort("date", -1).to_list(MAX_ROWS)
     return [serialize_doc(a) for a in advances]
 
 @api_router.post("/advances")
@@ -1735,7 +1740,7 @@ async def review_edit_request(req_id: str, request: Request):
 # ===== PAYROLL ROUTES =====
 
 async def get_weekly_payroll_data(week_num, year):
-    entries = await db.production_entries.find({"week_number": week_num, "year": year}).to_list(10000)
+    entries = await db.production_entries.find({"week_number": week_num, "year": year}).to_list(MAX_ROWS)
     operator_map = {}
     for entry in entries:
         op_id = entry.get("operator_id", "")
@@ -1889,7 +1894,7 @@ async def get_dashboard(request: Request):
     cw = await get_current_week()
     wk = cw.get("week_number", 0)
     yr = cw.get("year", datetime.now(timezone.utc).year)
-    week_entries = await db.production_entries.find({"week_number": wk, "year": yr}).to_list(10000)
+    week_entries = await db.production_entries.find({"week_number": wk, "year": yr}).to_list(MAX_ROWS)
     week_production = sum(e.get("total_quantity", 0) for e in week_entries)
     week_earnings = round(sum(e.get("total_earnings", 0) for e in week_entries), 2)
     lots = await db.lots.find({"status": "active"}).sort("lot_number", -1).to_list(100)
@@ -1960,7 +1965,7 @@ async def report_lot_matrix(lot_id: str, request: Request):
     lot = serialize_doc(lot)
     lot = await enrich_lot(lot)
     sizes = lot.get("sizes", [])
-    entries = await db.production_entries.find({"lot_id": lot_id, "counts_toward_plan": {"$ne": False}}).to_list(10000)
+    entries = await db.production_entries.find({"lot_id": lot_id, "counts_toward_plan": {"$ne": False}}).to_list(MAX_ROWS)
     produced = {}
     for e in entries:
         op = e.get("operation_name", "")
@@ -1998,7 +2003,7 @@ async def report_weekly_matrix(week: int, year: int, request: Request, color: Op
     query = {"week_number": week, "year": year}
     if color: query["color"] = color
     if operation: query["operation_name"] = operation
-    entries = await db.production_entries.find(query).to_list(10000)
+    entries = await db.production_entries.find(query).to_list(MAX_ROWS)
     lot_ids = list(set(e.get("lot_id", "") for e in entries))
     lots_map = {}
     for lid in lot_ids:
@@ -2029,7 +2034,7 @@ async def report_weekly_production(week: int, year: int, request: Request):
     user = await get_current_user(request)
     check_role(user, ["admin", "accounts"])
     check_permission(user, "can_view_financial")
-    entries = await db.production_entries.find({"week_number": week, "year": year}).to_list(10000)
+    entries = await db.production_entries.find({"week_number": week, "year": year}).to_list(MAX_ROWS)
     lot_map = {}
     for e in entries:
         lid = e.get("lot_id", "")
@@ -2071,7 +2076,7 @@ async def report_lot_color(lot_id: str, request: Request):
     lot = serialize_doc(lot)
     lot = await enrich_lot(lot)
     sizes = lot.get("sizes", [])
-    entries = await db.production_entries.find({"lot_id": lot_id, "counts_toward_plan": {"$ne": False}}).to_list(10000)
+    entries = await db.production_entries.find({"lot_id": lot_id, "counts_toward_plan": {"$ne": False}}).to_list(MAX_ROWS)
     produced = {}
     for e in entries:
         c = e.get("color", "")
@@ -2101,7 +2106,7 @@ async def report_lot_operation(lot_id: str, request: Request):
     lot = serialize_doc(lot)
     lot = await enrich_lot(lot)
     total_planned_qty = lot.get("total_planned_qty", 0)
-    entries = await db.production_entries.find({"lot_id": lot_id}).to_list(10000)
+    entries = await db.production_entries.find({"lot_id": lot_id}).to_list(MAX_ROWS)
     op_map = {}
     for e in entries:
         n = e.get("operation_name", "")
@@ -2140,7 +2145,7 @@ async def report_operator_detail(operator_id: str, request: Request, week: Optio
     if year: query["year"] = year
     if lot_id: query["lot_id"] = lot_id
     if color: query["color"] = color
-    entries = await db.production_entries.find(query).sort("date", 1).to_list(10000)
+    entries = await db.production_entries.find(query).sort("date", 1).to_list(MAX_ROWS)
     result = [serialize_doc(e) for e in entries]
     all_sizes = set()
     op_matrix = {}
@@ -2174,7 +2179,7 @@ async def get_lot_report(lot_id: str, request: Request):
         raise HTTPException(404, "Lot not found")
     lot = serialize_doc(lot)
     lot = await enrich_lot(lot)
-    entries = await db.production_entries.find({"lot_id": lot_id, "counts_toward_plan": {"$ne": False}}).to_list(10000)
+    entries = await db.production_entries.find({"lot_id": lot_id, "counts_toward_plan": {"$ne": False}}).to_list(MAX_ROWS)
     cs_map = {}
     for e in entries:
         color = e.get("color", "")
@@ -2191,7 +2196,7 @@ async def advance_report(request: Request, week: Optional[int] = None, year: Opt
     check_role(user, ["admin", "accounts"])
     check_permission(user, "can_view_financial")
     query = {}
-    advances = await db.advances.find(query).sort("date", -1).to_list(1000)
+    advances = await db.advances.find(query).sort("date", -1).to_list(MAX_ROWS)
     result = []
     for a in advances:
         adv = serialize_doc(a)
@@ -2256,7 +2261,7 @@ async def export_excel(request: Request, report_type: str, lot_id: Optional[str]
             for size in color.get("sizes", []):
                 ws.append([color["name"], size["size"], size["planned_qty"]])
         ws.append([])
-        entries = await db.production_entries.find({"lot_id": lot_id}).to_list(10000)
+        entries = await db.production_entries.find({"lot_id": lot_id}).to_list(MAX_ROWS)
         r = ws.max_row + 1
         prod_headers = ["Date", "Color", "Size", "Operation", "Qty", "Earnings (INR)"]
         ws.append(prod_headers)
@@ -2312,7 +2317,7 @@ async def export_excel(request: Request, report_type: str, lot_id: Optional[str]
         for i, h in enumerate(headers, 1):
             ws.cell(row=3, column=i).font = header_font
             ws.cell(row=3, column=i).fill = header_fill
-        entries = await db.production_entries.find({"lot_id": lot_id}).to_list(10000)
+        entries = await db.production_entries.find({"lot_id": lot_id}).to_list(MAX_ROWS)
         op_cost = {}
         for e in entries:
             n = e["operation_name"]

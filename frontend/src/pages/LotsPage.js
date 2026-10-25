@@ -6,7 +6,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog';
-import { Plus, Eye, Trash2, Lock, Unlock, Package, Search, AlertTriangle, Calculator, FileCheck2, CalendarCheck } from 'lucide-react';
+import { Plus, Eye, Trash2, Lock, Unlock, Package, Search, AlertTriangle, Calculator, FileCheck2, CalendarCheck, Fingerprint } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -232,6 +232,9 @@ export default function LotsPage() {
                                                             <Eye size={13} />
                                                         </Button>
                                                     )}
+                                                    <Link to={`/lots/${lot.id}/dna`} title="Lot DNA" aria-label={`DNA for ${lot.lot_number}`}
+                                                        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100" data-testid={`dna-${lot.id}`}>
+                                                        <Fingerprint size={13} /></Link>
                                                     <Link to={`/lots/${lot.id}/costing`} title="Costing report" aria-label={`Costing for ${lot.lot_number}`}
                                                         className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100" data-testid={`costing-${lot.id}`}>
                                                         <Calculator size={13} /></Link>

@@ -30,6 +30,7 @@ const StockPage = React.lazy(() => import('./pages/StockPage'));
 const LotCostingPage = React.lazy(() => import('./pages/LotCostingPage'));
 const LotClosurePage = React.lazy(() => import('./pages/LotClosurePage'));
 const YearEndPage = React.lazy(() => import('./pages/YearEndPage'));
+const LotDnaPage = React.lazy(() => import('./pages/LotDnaPage'));
 const PurchaseOrdersPage = React.lazy(() => import('./pages/PurchaseOrdersPage'));
 const ExpensesPage = React.lazy(() => import('./pages/ExpensesPage'));
 const PublicLanding = () => <Suspense fallback={<div className="p-8">Victoria Garments</div>}><Landing /></Suspense>;
@@ -59,6 +60,7 @@ function AppRoutes() {
             <Route path="/approvals" element={<ProtectedRoute><Suspense fallback={<div>Loading...</div>}><ApprovalsPage /></Suspense></ProtectedRoute>} />
             <Route path="/lots/:id/costing" element={<ProtectedRoute roles={['admin', 'accounts']}><Suspense fallback={<div>Loading...</div>}><LotCostingPage /></Suspense></ProtectedRoute>} />
             <Route path="/lots/:id/closure" element={<ProtectedRoute roles={['admin', 'accounts']}><Suspense fallback={<div>Loading...</div>}><LotClosurePage /></Suspense></ProtectedRoute>} />
+            <Route path="/lots/:id/dna" element={<ProtectedRoute roles={['admin', 'accounts']}><Suspense fallback={<div>Loading...</div>}><LotDnaPage /></Suspense></ProtectedRoute>} />
             <Route path="/year-end" element={<ProtectedRoute roles={['admin']}><Suspense fallback={<div>Loading...</div>}><YearEndPage /></Suspense></ProtectedRoute>} />
             <Route path="/stock" element={<ProtectedRoute roles={['admin', 'accounts']}><Suspense fallback={<div>Loading...</div>}><StockPage /></Suspense></ProtectedRoute>} />
             <Route path="/purchase-orders" element={<ProtectedRoute roles={['admin', 'accounts']}><Suspense fallback={<div>Loading...</div>}><PurchaseOrdersPage /></Suspense></ProtectedRoute>} />

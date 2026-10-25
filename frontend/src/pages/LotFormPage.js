@@ -368,11 +368,11 @@ export default function LotFormPage() {
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div>
                                     <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Start Date</Label>
-                                    <Input type="date" value={form.start_date} onChange={e => setForm({ ...form, start_date: e.target.value })} className="mt-1" data-testid="start-date-input" />
+                                    <Input type="date" value={form.start_date} onChange={e => setForm({ ...form, start_date: e.target.value })} className="mt-1" aria-label="Start date" data-testid="start-date-input" />
                                 </div>
                                 <div>
                                     <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Target End Date</Label>
-                                    <Input type="date" value={form.target_end_date} onChange={e => setForm({ ...form, target_end_date: e.target.value })} className="mt-1" data-testid="end-date-input" />
+                                    <Input type="date" value={form.target_end_date} onChange={e => setForm({ ...form, target_end_date: e.target.value })} className="mt-1" aria-label="Target end date" data-testid="end-date-input" />
                                 </div>
                             </div>
                             <div>

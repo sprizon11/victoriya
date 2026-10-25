@@ -145,10 +145,10 @@ export default function OperationsPage() {
                                 </TableCell>
                                 <TableCell className="text-right">
                                     <div className="flex justify-end gap-1">
-                                        <Button variant="ghost" size="sm" onClick={() => openEdit(op)} data-testid={`edit-op-${op.id}`}>
+                                        <Button variant="ghost" size="sm" aria-label={`Edit ${op.name}`} onClick={() => openEdit(op)} data-testid={`edit-op-${op.id}`}>
                                             <Pencil size={14} />
                                         </Button>
-                                        <Button variant="ghost" size="sm" onClick={() => handleDelete(op.id)} className="text-red-500 hover:text-red-700" data-testid={`delete-op-${op.id}`}>
+                                        <Button variant="ghost" size="sm" aria-label={`Delete ${op.name}`} onClick={() => handleDelete(op.id)} className="text-red-500 hover:text-red-700" data-testid={`delete-op-${op.id}`}>
                                             <Trash2 size={14} />
                                         </Button>
                                     </div>
