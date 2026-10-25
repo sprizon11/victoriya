@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { LazyMotion, domAnimation, m, useReducedMotion } from 'framer-motion';
 import { content as c } from './content';
 import { Header } from './sections/Header';
@@ -20,7 +19,7 @@ function OptionalSections() {
 function Footer() {
   const reduced = useReducedMotion();
   return <footer className="vg-footer"><div className="vg-container"><m.div className="vg-footer-wordmark" initial={reduced ? false : { y: 70 }} whileInView={{ y: 0 }} viewport={{ once: true }} transition={{ duration: 0.9 }}><img src="/victoria-logo-white.svg" width="1200" height="295" alt={c.logoAlt} /></m.div>
-    <div className="vg-footer-top"><p>{c.footerLine}</p><nav aria-label={c.menu}>{c.nav.map(([id, label]) => <a key={id} href={`#${id}`} data-testid={`footer-nav-${id}`}>{label}</a>)}<Link to="/login" data-testid="footer-staff">{c.staff}</Link></nav></div>
+    <div className="vg-footer-top"><p>{c.footerLine}</p><nav aria-label={c.menu}>{c.nav.map(([id, label]) => <a key={id} href={`#${id}`} data-testid={`footer-nav-${id}`}>{label}</a>)}</nav></div>
     <div className="vg-footer-bottom"><span>© {new Date().getFullYear()} {c.copyright}</span><span>{c.imageNote}</span></div></div></footer>;
 }
 

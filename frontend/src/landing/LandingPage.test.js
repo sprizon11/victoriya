@@ -26,6 +26,12 @@ test('all images declare alt text and no unconfirmed address is shown', () => {
   expect(page.querySelector('address')?.textContent).not.toContain('Sri Nagar');
 });
 
+test('public landing has no staff login link', () => {
+  const page = new DOMParser().parseFromString(markup(), 'text/html');
+  expect(page.querySelector('a[href="/login"]')).toBeNull();
+  expect(page.body.textContent).not.toContain('Staff login');
+});
+
 test('a confirmed optional section appears only when supplied', () => {
   content.certifications.push('Verified test certification');
   try {

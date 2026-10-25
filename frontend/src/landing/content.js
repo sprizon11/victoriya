@@ -15,7 +15,7 @@ export const content = {
   certifications: [], clients: [], markets: [], gallery: [], testimonials: [],
   // TODO(owner): confirm the suggested buyer journey below is how orders really begin.
   nav: [['about', 'About'], ['collection', 'What we make'], ['process', 'Our process'], ['gallery', 'Gallery'], ['contact', 'Contact']],
-  quote: 'Request a quote', staff: 'Staff login', call: 'Call us', skip: 'Skip to content', menu: 'Menu', closeMenu: 'Close menu',
+  quote: 'Request a quote', call: 'Call us', skip: 'Skip to content', menu: 'Menu', closeMenu: 'Close menu',
   eyebrow: 'VICTORIA GARMENTS · TIRUPPUR', headline: 'Thoughtfully made.\nReady to wear.',
   intro: 'Men’s and women’s wear, made in Tiruppur. Let’s talk about your next garment order.',
   imageCaption: 'Illustrative image', heroAlt: 'Illustrative folded navy, white and teal fabrics beside thread spools',
