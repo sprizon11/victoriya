@@ -35,6 +35,8 @@ import stock
 import purchasing
 import lifecycle
 import mailer
+import dashboard
+import dna
 import expenses
 from purchasing import RequirementIn, build_requirements, clean_post_pct, lot_planned_total, generate_pos_for_lot
 from ratetypes import default_rate_type, get_rate_type
@@ -2655,6 +2657,8 @@ lifecycle.configure(enrich_lot)
 app.include_router(purchasing.router)
 app.include_router(lifecycle.router)
 app.include_router(mailer.router)
+app.include_router(dashboard.router)
+app.include_router(dna.router)
 app.include_router(expenses.router)
 app.middleware("http")(audit_middleware)
 
