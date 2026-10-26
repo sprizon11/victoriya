@@ -21,7 +21,7 @@ const SettingsPage = React.lazy(() => import("./pages/SettingsPage"));
 const WeeksPage = React.lazy(() => import("./pages/WeeksPage"));
 const UsersPage = React.lazy(() => import("./pages/UsersPage"));
 
-const Landing = React.lazy(() => import('./landing/LandingPage'));
+const Landing = React.lazy(() => import('./pages/ComingSoonPage'));
 const EnquiriesPage = React.lazy(() => import('./pages/EnquiriesPage'));
 const AuditPage = React.lazy(() => import('./pages/AuditPage'));
 const ApprovalsPage = React.lazy(() => import('./pages/ApprovalsPage'));
