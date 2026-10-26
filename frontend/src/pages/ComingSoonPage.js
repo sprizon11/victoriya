@@ -11,11 +11,7 @@ export default function ComingSoonPage() {
     return (
         <div className="coming-soon">
             <header className="coming-header">
-                <div className="coming-brands">
-                    <img className="coming-victoria-logo" src="/victoria-logo-mark-light.png" alt="Victoria — Irresistible Fashion" width="220" height="46" />
-                    <span className="coming-brand-divider" aria-hidden="true" />
-                    <img className="coming-protrack-logo" src="/landing/brand-protrack-640.webp" alt="Pro Track — Power of Fashion" width="150" height="60" />
-                </div>
+                <span className="coming-header-name">VICTORIA GARMENTS</span>
                 <span className="coming-status"><span aria-hidden="true" /> A new chapter is on its way</span>
             </header>
 
@@ -47,6 +43,18 @@ export default function ComingSoonPage() {
                     <span className="coming-art-caption">SOMETHING BEAUTIFUL IS TAKING SHAPE</span>
                 </div>
             </main>
+
+            <section className="coming-brands" aria-labelledby="coming-brands-title">
+                <div className="coming-brands-heading">
+                    <span aria-hidden="true" />
+                    <h2 id="coming-brands-title">Our brands</h2>
+                    <span aria-hidden="true" />
+                </div>
+                <div className="coming-brand-grid">
+                    <img src="/landing/brand-victoria-640.webp" alt="Victoria — Irresistible Fashion" width="640" height="256" />
+                    <img src="/landing/brand-protrack-640.webp" alt="Pro Track — Power of Fashion" width="640" height="256" />
+                </div>
+            </section>
 
             <footer className="coming-footer">
                 <span>© {new Date().getFullYear()} Victoria Garments</span>

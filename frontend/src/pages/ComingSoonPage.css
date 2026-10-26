@@ -11,10 +11,13 @@
     overflow: hidden;
 }
 .coming-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 34px 0; border-bottom: 1px solid #ffffff1c; }
-.coming-brands { display: flex; align-items: center; gap: 24px; }
-.coming-victoria-logo { width: 200px; height: auto; }
-.coming-brand-divider { width: 1px; height: 32px; background: #ffffff26; }
-.coming-protrack-logo { width: 150px; height: auto; border-radius: 4px; }
+.coming-header-name { font-size: 11px; font-weight: 600; letter-spacing: .22em; }
+.coming-brands { width: 100%; max-width: 800px; margin: 0 auto; padding: 12px 0 52px; position: relative; }
+.coming-brands-heading { display: flex; align-items: center; gap: 20px; margin-bottom: 24px; }
+.coming-brands-heading > span { flex: 1; height: 1px; background: #ffffff1c; }
+.coming-brands-heading h2 { margin: 0; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .22em; color: #b9c8c9; }
+.coming-brand-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.coming-brand-grid img { display: block; width: 100%; height: auto; aspect-ratio: 5 / 2; object-fit: contain; border-radius: 6px; border: 1px solid #ffffff14; }
 .coming-status { display: flex; align-items: center; gap: 10px; font-size: 12px; color: #ccd7d7; }
 .coming-status > span { width: 7px; height: 7px; border-radius: 50%; background: var(--coming-mint); box-shadow: 0 0 0 5px #67dbc310; }
 .coming-main { flex: 1; display: grid; grid-template-columns: 1.2fr 1fr; align-items: center; gap: 40px; width: 100%; max-width: 1440px; margin: auto; padding: 70px 0 76px; }
@@ -53,11 +56,11 @@
 }
 @media (max-width: 650px) {
     .coming-header { padding: 25px 0; }
-    .coming-brands { gap: 12px; }
-    .coming-victoria-logo { width: clamp(110px, 35vw, 155px); }
-    .coming-protrack-logo { width: clamp(90px, 27vw, 120px); }
-    .coming-brand-divider { height: 25px; }
-    .coming-status { font-size: 0; gap: 0; }
+    .coming-header-name { font-size: 9px; letter-spacing: .16em; }
+    .coming-status { font-size: 10px; max-width: 130px; line-height: 1.5; }
+    .coming-status > span { flex-shrink: 0; }
+    .coming-brand-grid { grid-template-columns: 1fr; gap: 16px; }
+    .coming-brands { max-width: 380px; padding-bottom: 36px; }
     .coming-main { grid-template-columns: 1fr; padding: 52px 0 45px; gap: 65px; }
     .coming-eyebrow { font-size: 8px; margin-bottom: 25px; }
     .coming-copy h1 { font-size: clamp(53px, 12vw, 76px); }
