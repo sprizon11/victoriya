@@ -1,5 +1,4 @@
 import { useEffect } from 'react';
-import { Link } from 'react-router-dom';
 import './ComingSoonPage.css';
 
 export default function ComingSoonPage() {
@@ -12,7 +11,11 @@ export default function ComingSoonPage() {
     return (
         <div className="coming-soon">
             <header className="coming-header">
-                <img src="/victoria-logo-mark-light.png" alt="Victoria — Irresistible Fashion" width="220" height="46" />
+                <div className="coming-brands">
+                    <img className="coming-victoria-logo" src="/victoria-logo-mark-light.png" alt="Victoria — Irresistible Fashion" width="220" height="46" />
+                    <span className="coming-brand-divider" aria-hidden="true" />
+                    <img className="coming-protrack-logo" src="/landing/brand-protrack-640.webp" alt="Pro Track — Power of Fashion" width="150" height="60" />
+                </div>
                 <span className="coming-status"><span aria-hidden="true" /> A new chapter is on its way</span>
             </header>
 
@@ -48,7 +51,6 @@ export default function ComingSoonPage() {
             <footer className="coming-footer">
                 <span>© {new Date().getFullYear()} Victoria Garments</span>
                 <span className="coming-footer-center">Thoughtfully made. Always.</span>
-                <Link to="/login" data-testid="coming-soon-team-login">Team sign in <span aria-hidden="true">↗</span></Link>
             </footer>
         </div>
     );

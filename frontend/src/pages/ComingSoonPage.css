@@ -11,7 +11,10 @@
     overflow: hidden;
 }
 .coming-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 34px 0; border-bottom: 1px solid #ffffff1c; }
-.coming-header > img { width: 200px; height: auto; }
+.coming-brands { display: flex; align-items: center; gap: 24px; }
+.coming-victoria-logo { width: 200px; height: auto; }
+.coming-brand-divider { width: 1px; height: 32px; background: #ffffff26; }
+.coming-protrack-logo { width: 150px; height: auto; border-radius: 4px; }
 .coming-status { display: flex; align-items: center; gap: 10px; font-size: 12px; color: #ccd7d7; }
 .coming-status > span { width: 7px; height: 7px; border-radius: 50%; background: var(--coming-mint); box-shadow: 0 0 0 5px #67dbc310; }
 .coming-main { flex: 1; display: grid; grid-template-columns: 1.2fr 1fr; align-items: center; gap: 40px; width: 100%; max-width: 1440px; margin: auto; padding: 70px 0 76px; }
@@ -39,10 +42,6 @@
 .coming-art-caption { position: absolute; bottom: -18px; font-size: 8px; letter-spacing: .25em; color: #9fb6b4; text-align: center; }
 .coming-footer { border-top: 1px solid #ffffff1c; display: flex; justify-content: space-between; gap: 20px; padding: 26px 0; font-size: 10px; color: #93a6ac; }
 .coming-footer-center { font-family: Georgia, serif; font-style: italic; font-size: 13px; }
-.coming-footer a { color: #dae5e4; text-decoration: none; }
-.coming-footer a:hover { color: var(--coming-mint); }
-.coming-footer a:focus-visible { outline: 2px solid var(--coming-mint); outline-offset: 6px; }
-.coming-footer a > span { margin-left: 14px; }
 @media (min-width: 1600px) { .coming-main { padding-top: 100px; padding-bottom: 100px; } }
 @media (max-width: 900px) {
     .coming-main { gap: 20px; }
@@ -54,7 +53,10 @@
 }
 @media (max-width: 650px) {
     .coming-header { padding: 25px 0; }
-    .coming-header > img { width: 155px; }
+    .coming-brands { gap: 12px; }
+    .coming-victoria-logo { width: clamp(110px, 35vw, 155px); }
+    .coming-protrack-logo { width: clamp(90px, 27vw, 120px); }
+    .coming-brand-divider { height: 25px; }
     .coming-status { font-size: 0; gap: 0; }
     .coming-main { grid-template-columns: 1fr; padding: 52px 0 45px; gap: 65px; }
     .coming-eyebrow { font-size: 8px; margin-bottom: 25px; }
